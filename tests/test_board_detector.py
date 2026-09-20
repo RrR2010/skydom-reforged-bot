@@ -289,7 +289,8 @@ def test_small_island_with_one_weak_blocked_cell_is_preserved() -> None:
     detector = BoardDetector()
     topology = np.zeros((7, 9), dtype=np.bool_)
     topology[2:7, 3:6] = True
-    topology[4:7, 0:2] = True
+    topology[4, 1] = True
+    topology[5:7, 0:2] = True
 
     occupancy = np.zeros((7, 9), dtype=np.float32)
     occupancy[topology] = 0.93
@@ -297,15 +298,15 @@ def test_small_island_with_one_weak_blocked_cell_is_preserved() -> None:
     # Recreate the observed failure: a legitimate 5-cell island has one weak
     # blocker-covered cell, pulling its mean below the old 0.80 cutoff while
     # four of five cells remain individually strong.
-    occupancy[4, 0] = 0.28
+    occupancy[4, 1] = 0.18
 
     labels, sizes, means, strong_fractions, selected = detector._select_primary_topology(
         topology,
         occupancy,
     )
 
-    small_label = 1 + sizes.index(6)
+    small_label = 1 + sizes.index(5)
     assert means[small_label - 1] < 0.80
     assert strong_fractions[small_label - 1] >= 0.60
-    assert bool(selected[4, 0])
+    assert bool(selected[4, 1])
     assert bool(selected[6, 1])
