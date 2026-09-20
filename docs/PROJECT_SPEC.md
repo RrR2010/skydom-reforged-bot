@@ -51,13 +51,29 @@ The geometry pipeline is classical CV and is expected to remain classical unless
 ### Current semantic dimensions
 
 ```text
-TileColor: red, orange, yellow, green, blue, purple, unknown
-TileKind: normal, carrot, unknown
-TileBlocker: none, chain, unknown
+TileColor: none, red, orange, yellow, green, blue, purple, unknown
+TileKind: none, normal, carrot, unknown
+TileBlocker: none, chain, adjacent-clear, unknown
 TilePowerup: none, flyer, row, column, bomb, color-remover, unknown
 ```
 
 The taxonomy is intentionally compositional so new power-ups or modifiers can be added without multiplying combined classes.
+
+`none` and `unknown` have different semantics:
+
+- `none` means the dimension is known not to apply to this cell;
+- `unknown` means the dimension applies or may apply, but recognition/annotation cannot determine its value confidently.
+
+For a non-matchable obstacle that occupies the whole cell and clears when an adjacent match touches it, the intended state is:
+
+```text
+color   = none
+kind    = none
+blocker = adjacent-clear
+powerup = none
+```
+
+This avoids encoding known absence as model uncertainty.
 
 ## Dataset pipeline
 
