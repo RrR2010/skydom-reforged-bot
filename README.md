@@ -394,8 +394,9 @@ The default structure is:
 
 ```text
 dataset/
-  images/
-    <content-hash>.png
+  input/
+    images/
+      <content-hash>.png
   records/
     <content-hash>.json
 ```
@@ -558,3 +559,41 @@ dataset/records/<sample-id>.json -> labels
 The labeling interface is stored at `dataset/label-studio-config.xml` and
 exposes four independent single-choice dimensions: color, kind, blocker, and
 power-up.
+
+
+### Importing human annotations
+
+After Label Studio writes completed tasks into the configured Target Storage,
+merge the human ground truth back into canonical records with:
+
+```powershell
+skydom-import-label-studio
+```
+
+The importer reads `dataset/output/annotations/*.json`, locates
+`data.sample_id`, selects the latest complete annotation, and writes:
+
+```json
+"labels": {
+  "color": "...",
+  "kind": "...",
+  "blocker": "...",
+  "powerup": "..."
+}
+```
+
+into the corresponding `dataset/records/<sample-id>.json`. Existing
+`suggested` bootstrap predictions are preserved.
+
+The importer requires all four annotation controls to be present; partial
+annotations are skipped rather than becoming partial ground truth.
+
+## Project handoff documentation
+
+For continued development across agents or long-running sessions, see:
+
+- `docs/PROJECT_SPEC.md` — current project specification and architecture;
+- `docs/DECISIONS.md` — architecture decision log;
+- `docs/TODO.md` — prioritized roadmap and validation checklist;
+- `docs/HANDOFF.md` — current branch state, working conventions, known
+  variants, and immediate next steps.
