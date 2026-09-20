@@ -44,6 +44,11 @@ LABEL_CONFIG = """<View>
   <Header value="Power-up"/>
   <Choices name="powerup" toName="image" choice="single" showInLine="true" required="true">
     <Choice value="none"/>
+    <Choice value="flyer"/>
+    <Choice value="row"/>
+    <Choice value="column"/>
+    <Choice value="bomb"/>
+    <Choice value="color-remover"/>
     <Choice value="unknown"/>
   </Choices>
 </View>
