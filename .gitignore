@@ -12,8 +12,11 @@ __pycache__/
 
 # Python environments
 .venv/
+.venv-*/
 venv/
+venv-*/
 env/
+env-*/
 ENV/
 .python-version
 
