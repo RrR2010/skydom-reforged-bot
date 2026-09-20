@@ -1,0 +1,158 @@
+"""Classical color-based tile recognition for the first M3 milestone."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import cv2
+import numpy as np
+from numpy.typing import NDArray
+
+from skydom_bot.domain.board import BoardGeometry, Cell
+from skydom_bot.domain.tile import TileColor, TileObservation
+
+UInt8Image = NDArray[np.uint8]
+
+
+@dataclass(frozen=True, slots=True)
+class TileClassifierConfig:
+    """Thresholds for extracting bright, saturated tile pixels."""
+
+    center_radius_ratio: float = 0.38
+    saturation_min: int = 105
+    value_min: int = 125
+    min_foreground_fraction: float = 0.08
+    histogram_bins: int = 180
+    min_class_confidence: float = 0.48
+
+
+@dataclass(frozen=True, slots=True)
+class TileDiagnostics:
+    """Intermediate signals for one tile classification."""
+
+    crop_rgb: UInt8Image
+    crop_hsv: UInt8Image
+    center_mask: UInt8Image
+    foreground_mask: UInt8Image
+    hue_histogram: NDArray[np.float64]
+    class_scores: dict[TileColor, float]
+    dominant_hue: float | None
+
+
+class TileClassifier:
+    """Classify the base tile color from each known board cell.
+
+    This first recognizer intentionally answers only "what color family is this
+    tile?". Shape/special-piece recognition is a separate problem and will be
+    layered on later.
+    """
+
+    def __init__(self, config: TileClassifierConfig | None = None) -> None:
+        self.config = config or TileClassifierConfig()
+
+    def classify_board(
+        self,
+        image_rgb: UInt8Image,
+        geometry: BoardGeometry,
+    ) -> tuple[TileObservation, ...]:
+        """Classify every active board cell."""
+        return tuple(self.classify_cell(image_rgb, cell)[0] for cell in geometry.cells)
+
+    def classify_cell(
+        self,
+        image_rgb: UInt8Image,
+        cell: Cell,
+    ) -> tuple[TileObservation, TileDiagnostics]:
+        """Classify one cell and expose diagnostics for visual debugging."""
+        crop = image_rgb[
+            cell.bounds.y : cell.bounds.bottom,
+            cell.bounds.x : cell.bounds.right,
+        ].copy()
+        hsv = cv2.cvtColor(crop, cv2.COLOR_RGB2HSV)
+        height, width = crop.shape[:2]
+
+        center_mask = np.zeros((height, width), dtype=np.uint8)
+        radius = max(2, int(round(min(width, height) * self.config.center_radius_ratio)))
+        cv2.circle(center_mask, (width // 2, height // 2), radius, 255, -1)
+
+        saturated = cv2.inRange(
+            hsv,
+            np.array([0, self.config.saturation_min, self.config.value_min], dtype=np.uint8),
+            np.array([179, 255, 255], dtype=np.uint8),
+        )
+        foreground = cv2.bitwise_and(center_mask, saturated)
+
+        center_pixels = max(1, int(np.count_nonzero(center_mask)))
+        foreground_pixels = int(np.count_nonzero(foreground))
+        foreground_fraction = foreground_pixels / center_pixels
+
+        hue_values = hsv[:, :, 0][foreground > 0]
+        histogram = np.zeros(self.config.histogram_bins, dtype=np.float64)
+        dominant_hue: float | None = None
+
+        if hue_values.size:
+            histogram = np.bincount(
+                hue_values.astype(np.int32),
+                minlength=self.config.histogram_bins,
+            ).astype(np.float64)
+            histogram /= max(1.0, histogram.sum())
+            dominant_hue = float(np.argmax(histogram))
+
+        scores = self._class_scores(histogram)
+        color, confidence = self._select_color(scores, foreground_fraction)
+
+        observation = TileObservation(
+            row=cell.row,
+            col=cell.col,
+            color=color,
+            confidence=confidence,
+            dominant_hue=dominant_hue,
+            foreground_fraction=foreground_fraction,
+        )
+        diagnostics = TileDiagnostics(
+            crop_rgb=crop,
+            crop_hsv=hsv,
+            center_mask=center_mask,
+            foreground_mask=foreground,
+            hue_histogram=histogram,
+            class_scores=scores,
+            dominant_hue=dominant_hue,
+        )
+        return observation, diagnostics
+
+    @staticmethod
+    def _circular_range_sum(histogram: NDArray[np.float64], start: int, end: int) -> float:
+        """Sum a hue interval, supporting OpenCV hue wraparound at 180."""
+        if start <= end:
+            return float(histogram[start : end + 1].sum())
+        return float(histogram[start:].sum() + histogram[: end + 1].sum())
+
+    def _class_scores(self, histogram: NDArray[np.float64]) -> dict[TileColor, float]:
+        """Return hue-mass scores for the game's base color families."""
+        return {
+            TileColor.RED: self._circular_range_sum(histogram, 170, 8),
+            TileColor.ORANGE: self._circular_range_sum(histogram, 9, 20),
+            TileColor.YELLOW: self._circular_range_sum(histogram, 21, 35),
+            TileColor.GREEN: self._circular_range_sum(histogram, 36, 85),
+            TileColor.BLUE: self._circular_range_sum(histogram, 86, 132),
+            TileColor.PURPLE: self._circular_range_sum(histogram, 133, 169),
+        }
+
+    def _select_color(
+        self,
+        scores: dict[TileColor, float],
+        foreground_fraction: float,
+    ) -> tuple[TileColor, float]:
+        if foreground_fraction < self.config.min_foreground_fraction or not scores:
+            return TileColor.UNKNOWN, 0.0
+
+        ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)
+        best_color, best_score = ranked[0]
+        second_score = ranked[1][1] if len(ranked) > 1 else 0.0
+
+        # Confidence combines absolute hue mass with separation from runner-up.
+        separation = max(0.0, best_score - second_score)
+        confidence = float(np.clip(0.65 * best_score + 0.35 * separation, 0.0, 1.0))
+        if confidence < self.config.min_class_confidence:
+            return TileColor.UNKNOWN, confidence
+        return best_color, confidence
