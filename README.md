@@ -77,8 +77,10 @@ Navigate with **Previous / Next** or the arrow keys. The steps show:
 6. X-axis normalized autocorrelation and detected peaks;
 7. Y-axis edge-energy image and 1D profile;
 8. Y-axis normalized autocorrelation and detected peaks;
-9. per-cell evidence matrix before and after thresholding;
-10. final board topology.
+9. per-cell evidence matrix and strong visual cells;
+10. ternary visual evidence: strong / uncertain / absent;
+11. structural reconciliation using cardinal-neighbor support;
+12. final board topology.
 
 To export every step as a PNG:
 
@@ -92,7 +94,7 @@ For headless export without opening a Matplotlib window:
 skydom-debug-vision --screen --monitor 1 --save-steps .\artifacts\vision-steps --no-window
 ```
 
-The **cell evidence** step is particularly useful when a hint animation, blocker, or special tile causes a valid cell to disappear from the inferred topology: it exposes the continuous evidence score rather than only the final X/blank decision.
+The **cell evidence** and **structural reconciliation** steps are particularly useful when a hint animation, blocker, or special tile weakens a real cell. The detector keeps ambiguous visual evidence instead of discarding it immediately, then conservatively promotes an uncertain interior cell only when the surrounding grid strongly supports its existence.
 
 ## Tests
 
