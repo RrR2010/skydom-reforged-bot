@@ -463,7 +463,7 @@ storage synchronization naturally incremental.
 
 Each task includes:
 
-- the existing crop through `/data/local-files/?d=images/<sample-id>.png`;
+- the existing crop through `/data/local-files/?d=dataset/images/<sample-id>.png`;
 - `sample_id`;
 - row, column, and capture source metadata;
 - the classical recognizer output as Label Studio `predictions`, never as
@@ -475,15 +475,21 @@ Studio's internal database.
 
 #### Local Label Studio startup
 
-Keep Label Studio in its separate Python 3.12 environment and expose the
-dataset directory as the local-files document root:
+Keep Label Studio in its separate Python 3.12 environment. The repository
+contains a launcher that sets the required environment variables for the
+current process and starts Label Studio:
 
 ```powershell
-.\.venv-labelstudio\Scripts\Activate.ps1
-$env:LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED="true"
-$env:LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT=(Resolve-Path ".\dataset").Path
-label-studio
+.\scripts\start-label-studio.ps1
 ```
+
+The launcher sets `LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT` to the repository
+root, not directly to `dataset`. Label Studio requires each configured Local
+Files storage to be a subdirectory of that document root.
+
+These environment variables are process-local. Closing the terminal loses
+them, but the launcher script is persistent project configuration, so there is
+no need to define machine-wide variables.
 
 #### Recommended Source Storage
 
