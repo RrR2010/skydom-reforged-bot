@@ -169,7 +169,7 @@ class TileDebugger:
         self.crop_ax.set_title(
             f"Cell ({observation.row},{observation.col}) — RGB | extracted foreground\n"
             f"prediction={observation.color.value}  confidence={observation.confidence:.3f}  "
-            f"foreground={observation.foreground_fraction:.2f}"
+            f"color_foreground={observation.foreground_fraction:.2f}"
         )
 
     def _render_features(self, diagnostics: TileDiagnostics) -> None:
@@ -209,7 +209,8 @@ class TileDebugger:
 
         f = diagnostics.features
         self.shape_ax.set_title(
-            "Shape descriptors — contour overlay | binary mask\n"
+            "Shape descriptors — full-cell foreground, no circular color mask\n"
+            "contour overlay | binary mask\n"
             f"components={f.component_count}  holes={f.hole_count}\n"
             f"area={f.area_fraction:.2f}  circularity={f.circularity:.2f}\n"
             f"aspect={f.aspect_ratio:.2f}  extent={f.extent:.2f}\n"
@@ -224,7 +225,7 @@ class TileDebugger:
         )
         shape = extract_shape_features(
             diagnostics.crop_rgb,
-            diagnostics.foreground_mask,
+            diagnostics.shape_foreground_mask,
         )
         self._render_board()
         self._render_crop(observation, diagnostics)
