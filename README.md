@@ -426,3 +426,43 @@ Only the selected cells are exported to the local dataset. Existing human labels
 This makes the debugger a lightweight active-data-collection tool: unusual power-ups, blockers, uncertain pieces, and newly discovered object types can be collected while playing without saving full browser screenshots.
 
 The next dataset milestone is human annotation plus a train/validation split. Only after enough representative crops exist will a learned classifier dependency be added.
+
+
+### Label Studio integration
+
+The local crop dataset can now be exported into Label Studio's task format:
+
+```powershell
+skydom-export-label-studio
+```
+
+This writes:
+
+```text
+dataset/label_studio/config.xml
+dataset/label_studio/tasks.json
+```
+
+The generated tasks reference the existing crop images through Label Studio's local-file endpoint:
+
+```text
+/data/local-files/?d=images/<sample-id>.png
+```
+
+and import the current classical recognizer output as `predictions`, not annotations. This keeps bootstrap suggestions visually available while preserving human annotation as the source of truth.
+
+For a local Windows setup, start Label Studio from its separate environment with local file serving enabled and the dataset directory as the document root:
+
+```powershell
+.\.venv-labelstudio\Scripts\Activate.ps1
+$env:LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED="true"
+$env:LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT=(Resolve-Path ".\dataset").Path
+label-studio
+```
+
+Then create a project in Label Studio:
+
+1. use the contents of `dataset/label_studio/config.xml` as the custom labeling interface;
+2. import `dataset/label_studio/tasks.json` as the project data.
+
+The configuration exposes four independent single-choice dimensions: color, kind, blocker, and power-up.
