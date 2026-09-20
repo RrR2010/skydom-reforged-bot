@@ -96,3 +96,42 @@ def test_diagnostics_expose_pitch_signals_and_cell_evidence() -> None:
     assert diagnostics.occupancy.shape == (geometry.rows, geometry.cols)
     assert float(diagnostics.occupancy.max()) <= 1.0
     assert float(diagnostics.occupancy.min()) >= 0.0
+    assert diagnostics.evidence_state.shape == diagnostics.occupancy.shape
+    assert diagnostics.cardinal_support.shape == diagnostics.occupancy.shape
+    assert diagnostics.reconciled_topology.shape == diagnostics.occupancy.shape
+
+
+def test_structural_reconciliation_promotes_only_surrounded_uncertain_cell() -> None:
+    detector = BoardDetector()
+    occupancy = np.array(
+        [
+            [0.00, 0.90, 0.00],
+            [0.90, 0.42, 0.90],
+            [0.00, 0.90, 0.00],
+        ],
+        dtype=np.float32,
+    )
+
+    state, support, topology = detector._reconcile_topology(occupancy)
+
+    assert int(state[1, 1]) == 1
+    assert int(support[1, 1]) == 4
+    assert bool(topology[1, 1])
+
+
+def test_structural_reconciliation_does_not_fill_irregular_edge_gap() -> None:
+    detector = BoardDetector()
+    occupancy = np.array(
+        [
+            [0.95, 0.95, 0.95],
+            [0.95, 0.32, 0.00],
+            [0.95, 0.29, 0.00],
+        ],
+        dtype=np.float32,
+    )
+
+    state, support, topology = detector._reconcile_topology(occupancy)
+
+    assert int(state[1, 1]) == 1
+    assert int(support[1, 1]) == 2
+    assert not bool(topology[1, 1])
