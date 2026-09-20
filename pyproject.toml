@@ -24,6 +24,7 @@ skydom-debug-vision = "skydom_bot.debug.vision_debugger:main"
 skydom-debug-tiles = "skydom_bot.debug.tile_debugger:main"
 skydom-collect-tiles = "skydom_bot.dataset.cli:main"
 skydom-export-label-studio = "skydom_bot.dataset.label_studio_cli:main"
+skydom-import-label-studio = "skydom_bot.dataset.label_studio_import_cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/skydom_bot"]
