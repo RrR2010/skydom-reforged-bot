@@ -348,3 +348,81 @@ PURPLE + NORMAL + CHAIN + NONE
 ```
 
 The exact power-up taxonomy remains open for future additions as new game pieces are observed.
+
+
+## M4: dataset-first learned recognizer foundation
+
+The project is now deliberately pivoting away from adding more appearance-specific thresholds to the classical tile recognizer.
+
+The current split is:
+
+```text
+screen
+  -> classical board geometry
+  -> logical cells
+  -> tile recognizer contract
+       -> ClassicalTileRecognizer   (current baseline)
+       -> LearnedTileRecognizer     (future)
+       -> HybridTileRecognizer      (future)
+  -> TileStateEstimate
+```
+
+`TileStateEstimate` is the model-neutral contract consumed by later board-state and solver code. It contains only semantic outputs:
+
+- color + confidence;
+- kind + confidence;
+- blocker + confidence;
+- power-up + confidence.
+
+Masks, contours, HSV histograms, CNN tensors, and other implementation-specific diagnostics stay outside that contract. This lets the recognition implementation change without forcing the solver to change.
+
+### Collecting training crops
+
+A new local dataset collector stores every active board cell as a lossless PNG plus a JSON record:
+
+```powershell
+skydom-collect-tiles --screen --monitor 1
+```
+
+or:
+
+```powershell
+skydom-collect-tiles --image .\samples\board.png
+```
+
+The default structure is:
+
+```text
+dataset/
+  images/
+    <content-hash>.png
+  records/
+    <content-hash>.json
+```
+
+Crops are de-duplicated by a SHA-256-derived content ID.
+
+Each record intentionally separates:
+
+```text
+suggested = current recognizer prediction
+labels    = human-confirmed ground truth (initially null)
+```
+
+This separation is critical: the classical heuristic output must not silently become training truth, otherwise a learned model would merely reproduce its mistakes.
+
+The local `dataset/` directory is git-ignored.
+
+### Exporting interesting cells from the debugger
+
+In `skydom-debug-tiles`, select up to six cells and press:
+
+```text
+E
+```
+
+Only the selected cells are exported to the local dataset. Existing human labels in their JSON records are preserved when the same crop is encountered again.
+
+This makes the debugger a lightweight active-data-collection tool: unusual power-ups, blockers, uncertain pieces, and newly discovered object types can be collected while playing without saving full browser screenshots.
+
+The next dataset milestone is human annotation plus a train/validation split. Only after enough representative crops exist will a learned classifier dependency be added.
