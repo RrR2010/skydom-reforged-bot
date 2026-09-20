@@ -204,13 +204,17 @@ class TileDebugger:
             f"{score_text}"
         )
 
-    def _render_shape(self, diagnostics: ShapeDiagnostics) -> None:
+    def _render_shape(
+        self,
+        diagnostics: ShapeDiagnostics,
+        tile_diagnostics: TileDiagnostics,
+    ) -> None:
         self.shape_ax.clear()
 
         top = diagnostics.contour_overlay
         mask_rgb = np.repeat(diagnostics.contour_mask[:, :, None], 3, axis=2)
         overlay_rgb = np.repeat(
-            self._last_tile_diagnostics.overlay_foreground_mask[:, :, None],
+            tile_diagnostics.overlay_foreground_mask[:, :, None],
             3,
             axis=2,
         )
@@ -239,7 +243,6 @@ class TileDebugger:
             self.image_rgb,
             self.selected,
         )
-        self._last_tile_diagnostics = diagnostics
         shape = extract_shape_features(
             diagnostics.crop_rgb,
             diagnostics.shape_foreground_mask,
@@ -247,7 +250,7 @@ class TileDebugger:
         self._render_board()
         self._render_crop(observation, diagnostics)
         self._render_features(diagnostics)
-        self._render_shape(shape)
+        self._render_shape(shape, diagnostics)
         self.figure.suptitle(
             "Skydom Tile Debugger — color + classical shape descriptors",
             fontsize=14,
