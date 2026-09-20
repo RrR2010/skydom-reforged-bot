@@ -607,6 +607,25 @@ into the corresponding `dataset/records/<sample-id>.json`. Existing
 The importer requires all four annotation controls to be present; partial
 annotations are skipped rather than becoming partial ground truth.
 
+### Dataset statistics and validation
+
+Review human-label coverage and class balance with:
+
+```powershell
+skydom-dataset-stats
+```
+
+Use strict validation before training or splitting the dataset:
+
+```powershell
+skydom-dataset-stats --strict
+```
+
+The command reports labeled/unlabeled totals and class distributions for
+color, kind, blocker, and power-up. It also checks complete/known label values,
+record/sample-id consistency, and referenced crop existence. Bootstrap
+`suggested` predictions are never counted as human labels.
+
 ## Project handoff documentation
 
 For continued development across agents or long-running sessions, see:
