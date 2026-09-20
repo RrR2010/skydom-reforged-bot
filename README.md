@@ -177,3 +177,31 @@ This avoids hard-coding a screen position for the player board. The vision debug
 ### Orange gradient handling
 
 The orange square pieces span both red-orange and orange hue bins because of their strong vertical gradient. The classifier now uses the winning hue-family mass as its confidence baseline instead of heavily penalizing a strong runner-up color. This preserves an `UNKNOWN` fallback while allowing a plurality-orange tile to remain orange.
+
+
+### Shape diagnostics
+
+The tile debugger now also extracts classical geometric descriptors from the segmented foreground. This stage does not yet assign semantic labels such as `CARROT`, `CHAINED`, or `SPECIAL`; it exposes measurable shape evidence first.
+
+For the selected cell, the debugger shows:
+
+- largest-contour overlay and binary foreground mask;
+- connected component count;
+- internal hole count;
+- area fraction;
+- contour circularity;
+- bounding-box aspect ratio;
+- extent;
+- solidity;
+- centroid offset.
+
+These features are useful for visually separating cases such as:
+
+```text
+yellow ring        -> hole_count > 0
+elongated carrot   -> non-square aspect ratio / shifted centroid
+fragmented overlay -> multiple components
+compact base tile  -> high solidity / compact contour
+```
+
+The goal is to inspect real game variants before turning these descriptors into hard semantic rules.
