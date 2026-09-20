@@ -89,6 +89,15 @@ labels    = human ground truth
 
 Suggested predictions must never silently become training truth.
 
+Dataset statistics/validation:
+
+```powershell
+skydom-dataset-stats
+skydom-dataset-stats --strict
+```
+
+The command reports labeled/unlabeled totals and per-head human-label distributions for color/kind/blocker/powerup. It validates complete label objects, enum values, sample-id/file consistency, and referenced crop paths. `suggested` predictions are intentionally ignored for label counts.
+
 ## Label Studio integration
 
 Source Storage:
