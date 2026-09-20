@@ -155,3 +155,25 @@ cell crop
 ```
 
 This is intentionally simpler than a neural classifier. It makes segmentation and feature design directly observable and gives us a baseline before adding shape recognition or learned models.
+
+
+### Competitive levels with an opponent mini-board
+
+Some levels render a second, smaller Match-3 board for the opponent. A color-only board detector can accidentally merge both boards because they share the same visual theme.
+
+The geometry pipeline now resolves this *after* pitch inference:
+
+```text
+segmented board-like pixels
+  -> logical grid at detected player-cell pitch
+  -> structural reconciliation
+  -> 4-connected topology components
+  -> keep the dominant component (and any comparably sized islands)
+  -> normalize rows/columns around the retained player board
+```
+
+This avoids hard-coding a screen position for the player board. The vision debugger now includes a **Board component selection** step and opens there by default.
+
+### Orange gradient handling
+
+The orange square pieces span both red-orange and orange hue bins because of their strong vertical gradient. The classifier now uses the winning hue-family mass as its confidence baseline instead of heavily penalizing a strong runner-up color. This preserves an `UNKNOWN` fallback while allowing a plurality-orange tile to remain orange.
