@@ -21,6 +21,8 @@ class ShapeFeatures:
     perimeter: float
     circularity: float
     aspect_ratio: float
+    oriented_aspect_ratio: float
+    orientation_deg: float
     extent: float
     solidity: float
     centroid_offset: float
@@ -53,7 +55,7 @@ def extract_shape_features(
     )
 
     if not contours:
-        empty = ShapeFeatures(0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        empty = ShapeFeatures(0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
         return ShapeDiagnostics(mask, crop_rgb.copy(), empty)
 
     hierarchy_array = hierarchy[0] if hierarchy is not None else np.empty((0, 4), dtype=np.int32)
@@ -62,10 +64,17 @@ def extract_shape_features(
         for index in range(len(contours))
         if hierarchy is None or hierarchy_array[index][3] == -1
     ]
+    # Tiny holes are usually antialiasing/highlight threshold artifacts rather
+    # than meaningful geometry. Count only holes with visible area.
+    hole_area_min = max(4.0, mask.size * 0.008)
     hole_count = sum(
         1
-        for index in range(len(contours))
-        if hierarchy is not None and hierarchy_array[index][3] != -1
+        for index, contour in enumerate(contours)
+        if (
+            hierarchy is not None
+            and hierarchy_array[index][3] != -1
+            and cv2.contourArea(contour) >= hole_area_min
+        )
     )
 
     outer_contours = [contours[index] for index in outer_indices]
@@ -83,6 +92,14 @@ def extract_shape_features(
         else 0.0
     )
     aspect_ratio = float(width / max(1, height))
+
+    rotated_rect = cv2.minAreaRect(largest)
+    (_, _), (rot_w, rot_h), raw_angle = rotated_rect
+    major = max(float(rot_w), float(rot_h), 1.0)
+    minor = max(min(float(rot_w), float(rot_h)), 1.0)
+    oriented_aspect_ratio = float(major / minor)
+    orientation_deg = float(raw_angle if rot_w >= rot_h else raw_angle + 90.0)
+
     extent = float(area / bbox_area)
     solidity = float(area / hull_area)
 
@@ -107,6 +124,8 @@ def extract_shape_features(
     overlay = crop_rgb.copy()
     cv2.drawContours(overlay, outer_contours, -1, (255, 255, 255), 1)
     cv2.rectangle(overlay, (x, y), (x + width - 1, y + height - 1), (255, 255, 255), 1)
+    box = cv2.boxPoints(rotated_rect).astype(np.int32)
+    cv2.polylines(overlay, [box], True, (255, 255, 255), 1)
     cv2.circle(overlay, (int(round(cx)), int(round(cy))), 2, (255, 255, 255), -1)
 
     features = ShapeFeatures(
@@ -116,6 +135,8 @@ def extract_shape_features(
         perimeter=perimeter,
         circularity=circularity,
         aspect_ratio=aspect_ratio,
+        oriented_aspect_ratio=oriented_aspect_ratio,
+        orientation_deg=orientation_deg,
         extent=extent,
         solidity=solidity,
         centroid_offset=centroid_offset,
