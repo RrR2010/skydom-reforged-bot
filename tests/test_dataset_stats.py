@@ -128,3 +128,24 @@ def test_statistics_report_missing_image_without_promoting_suggestion(tmp_path) 
     assert stats.labeled == 0
     assert stats.distributions["color"] == {}
     assert any("image does not exist" in issue.message for issue in stats.issues)
+
+
+def test_statistics_accept_non_applicable_adjacent_clear_obstacle(tmp_path) -> None:
+    _write_record(
+        tmp_path,
+        "obstacle",
+        labels={
+            "color": "none",
+            "kind": "none",
+            "blocker": "adjacent-clear",
+            "powerup": "none",
+        },
+    )
+
+    stats = collect_dataset_statistics(tmp_path)
+
+    assert stats.invalid == 0
+    assert stats.labeled == 1
+    assert stats.distributions["color"] == {"none": 1}
+    assert stats.distributions["kind"] == {"none": 1}
+    assert stats.distributions["blocker"] == {"adjacent-clear": 1}
