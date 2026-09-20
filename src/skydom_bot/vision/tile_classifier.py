@@ -25,7 +25,7 @@ class TileClassifierConfig:
     shape_inset_ratio: float = 0.04
     shape_component_min_largest_ratio: float = 0.12
     shape_component_min_area_ratio: float = 0.015
-    shape_bridge_ratio: float = 0.14
+    shape_bridge_ratio: float = 0.18
     histogram_bins: int = 180
     min_class_confidence: float = 0.50
 
