@@ -296,11 +296,19 @@ def _render_component_selection(left: Axes, right: Axes, ctx: DebugContext) -> N
     selected = ctx.diagnostics.selected_topology
     sizes = ctx.diagnostics.topology_component_sizes
     means = ctx.diagnostics.topology_component_mean_evidence
+    strong_fractions = ctx.diagnostics.topology_component_strong_fraction
 
     left.imshow(labels)
-    stats = ", ".join(
-        f"{index}: n={size}, mean={mean:.2f}"
-        for index, (size, mean) in enumerate(zip(sizes, means), start=1)
+    stat_lines = [
+        f"{index}: n={size}, mean={mean:.2f}, strong={strong:.0%}"
+        for index, (size, mean, strong) in enumerate(
+            zip(sizes, means, strong_fractions),
+            start=1,
+        )
+    ]
+    stats = "\n".join(
+        "   ".join(stat_lines[index : index + 3])
+        for index in range(0, len(stat_lines), 3)
     ) or "single component"
     left.set_title(
         "4-connected topology components before board selection\n"
@@ -323,7 +331,7 @@ def _render_component_selection(left: Axes, right: Axes, ctx: DebugContext) -> N
     right.imshow(selected, cmap="gray", vmin=0, vmax=1)
     right.set_title(
         "Retained player-board topology before normalization\n"
-        "keep comparable components or small islands with strong same-scale evidence"
+        "keep comparable components, high-mean islands, or islands with mostly strong cells"
     )
     right.set_xlabel("column")
     right.set_ylabel("row")
