@@ -190,6 +190,8 @@ def test_sparse_disconnected_islands_can_form_one_board_candidate() -> None:
     islands = [
         (0, 4),
         (2, 0),
+        (2, 1),
+        (2, 7),
         (2, 8),
         (4, 0),
         (4, 1),
