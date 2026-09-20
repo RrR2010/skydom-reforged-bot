@@ -7,19 +7,19 @@ from textwrap import dedent
 
 
 _TOPICS: dict[str, str] = {
-    "inspect": dedent("""\\
+    "inspect": dedent("""
         Inspect board geometry from a screenshot or live screen.
 
           skydom-inspect
           skydom-inspect --image .\\samples\\board.png
     """),
-    "debug-vision": dedent("""\\
+    "debug-vision": dedent("""
         Open the board-geometry visual debugger.
 
           skydom-debug-vision
           skydom-debug-vision --start-step 1
     """),
-    "debug-tiles": dedent("""\\
+    "debug-tiles": dedent("""
         Open the interactive tile debugger.
 
           skydom-debug-tiles
@@ -29,7 +29,7 @@ _TOPICS: dict[str, str] = {
           S  save the comparison image
           C  clear comparison selection
     """),
-    "collect": dedent("""\\
+    "collect": dedent("""
         Capture the current board and collect every active cell.
 
           skydom-collect-tiles
@@ -37,7 +37,7 @@ _TOPICS: dict[str, str] = {
 
         New crops are written directly to dataset/input/images/.
     """),
-    "stats": dedent("""\\
+    "stats": dedent("""
         Summarize human-label coverage and validate canonical dataset records.
 
           skydom-dataset-stats
@@ -45,19 +45,19 @@ _TOPICS: dict[str, str] = {
 
         Bootstrap predictions under suggested are never counted as labels.
     """),
-    "export": dedent("""\\
+    "export": dedent("""
         Export newly collected samples as an incremental Label Studio batch.
 
           skydom-export-label-studio
 
         Then use Sync Storage in Label Studio.
     """),
-    "import": dedent("""\\
+    "import": dedent("""
         Import submitted Label Studio annotations back into dataset records.
 
           skydom-import-label-studio
     """),
-    "label-studio": dedent("""\\
+    "label-studio": dedent("""
         Start the project-local Label Studio environment.
 
           .\\scripts\\start-label-studio.ps1
@@ -69,7 +69,7 @@ _TOPICS: dict[str, str] = {
           skydom-import-label-studio
           skydom-dataset-stats
     """),
-    "workflow": dedent("""\\
+    "workflow": dedent("""
         Typical data-collection workflow:
 
           1. skydom-collect-tiles
@@ -91,7 +91,7 @@ def _parser() -> argparse.ArgumentParser:
         prog="skydom",
         description="Command guide for the Skydom Reforged bot.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=dedent("""\\
+        epilog=dedent("""
             Commands:
               skydom-inspect              inspect board geometry
               skydom-debug-vision         visual board-geometry debugger
