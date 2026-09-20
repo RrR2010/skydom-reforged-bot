@@ -270,3 +270,50 @@ skydom-debug-tiles --screen --monitor 1 --compare-output .\artifacts\my-comparis
 ```
 
 This view is intended for comparing visually equivalent pieces, normal vs blocked variants, and several failure cases in one shareable screenshot.
+
+
+## M3 semantic interpretation
+
+The perception stack now adds a conservative semantic layer on top of color, shape, and overlay extraction.
+
+Current semantic outputs are:
+
+- `TileKind.NORMAL`
+- `TileKind.CARROT`
+- `TileKind.UNKNOWN`
+- `TileBlocker.NONE`
+- `TileBlocker.CHAIN`
+- `TileBlocker.UNKNOWN`
+
+The semantic classifier intentionally uses several signals rather than one hard shape threshold:
+
+```text
+base color
+  + reconstructed base shape
+  + residual overlay fraction
+  + same-color peer comparison
+  -> kind / blocker scores
+```
+
+Same-color peers act as adaptive prototypes. For each color family, the classifier computes a robust median feature vector and median-absolute-deviation scale across:
+
+- area fraction;
+- circularity;
+- rotation-aware aspect ratio;
+- solidity;
+- centroid offset.
+
+This lets a yellow chained tile be detected as an outlier even when the yellow chain merges into the yellow base mask and produces little different-color residual evidence.
+
+Carrots are currently recognized only when several conservative geometric signals agree (elongated rotated shape, compact/solid silhouette, centered object, and little residual overlay). Ambiguous cells remain `UNKNOWN` instead of forcing a label.
+
+The multi-cell debugger now displays, for each comparison card:
+
+```text
+kind=<label>:<confidence>
+blocker=<label>:<confidence>
+anom=<same-color shape anomaly>
+res=<residual overlay fraction>
+```
+
+These scores are intended to stay visible while we collect more real game variants before broadening the semantic rules.
