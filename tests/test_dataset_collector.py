@@ -65,6 +65,7 @@ def test_collector_saves_images_and_keeps_predictions_separate_from_labels(tmp_p
     record_path = tmp_path / "records" / f"{records[0].sample_id}.json"
     payload = json.loads(record_path.read_text(encoding="utf-8"))
     assert payload["labels"] is None
+    assert payload["image"].startswith("input/images/")
     assert (tmp_path / payload["image"]).exists()
 
 
