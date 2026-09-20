@@ -2,7 +2,7 @@
 
 ## Immediate validation
 
-- [ ] Pull latest branch and run full `pytest` after Label Studio importer changes.
+- [x] Pull latest branch and run full `pytest` after Label Studio importer changes (50 passed).
 - [x] Submit several annotations in Label Studio and confirm Target Storage files appear in `dataset/output/annotations`.
 - [x] Run `skydom-import-label-studio` against real Target Storage output.
 - [x] Verify imported `labels` match the UI selections and `suggested` remains unchanged.
@@ -18,6 +18,7 @@
 - [x] Add observed `TilePowerup` enum values and synchronize Label Studio config.
 - [ ] Capture animation/highlight/hint states and decide whether they are excluded, separately labeled, or temporally filtered.
 - [x] Add dataset statistics command: counts by color/kind/blocker/powerup and unlabeled count.
+- [x] Add board-capture provenance to newly collected records for leakage-safe grouping.
 - [ ] Add train/validation split keyed by capture/board rather than random crop only, to reduce leakage.
 
 ## Learned recognition
