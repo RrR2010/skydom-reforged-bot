@@ -233,7 +233,7 @@ def build_collection_report(stats: DatasetStatistics) -> str:
         band = coverage_band(count)
         lines.append(
             f"| {color} | {count} | "
-            f"{_capture_text(capture groups, provenance_trusted=provenance_trusted)} | "
+            f"{_capture_text(captures, provenance_trusted=provenance_trusted)} | "
             f"{band.name} |"
         )
 
