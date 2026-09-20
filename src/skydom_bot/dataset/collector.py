@@ -31,6 +31,7 @@ class DatasetRecord:
     row: int
     col: int
     source: str
+    capture_ids: tuple[str, ...]
     suggested: dict[str, Any]
     labels: dict[str, str] | None
 
@@ -56,6 +57,21 @@ class DatasetCollector:
         digest = sha256()
         digest.update(str(crop_rgb.shape).encode("ascii"))
         digest.update(crop_rgb.tobytes())
+        return digest.hexdigest()[:20]
+
+    @staticmethod
+    def _capture_id(image_rgb: UInt8Image, geometry: BoardGeometry) -> str:
+        """Hash one detected board capture for leakage-safe dataset grouping."""
+        bounds = geometry.bounds
+        board_crop = image_rgb[
+            bounds.y : bounds.bottom,
+            bounds.x : bounds.right,
+        ]
+        digest = sha256()
+        digest.update(f"{geometry.rows}x{geometry.cols}".encode("ascii"))
+        digest.update(geometry.topology_text(active="1", empty="0").encode("ascii"))
+        digest.update(str(board_crop.shape).encode("ascii"))
+        digest.update(board_crop.tobytes())
         return digest.hexdigest()[:20]
 
     @staticmethod
@@ -93,6 +109,7 @@ class DatasetCollector:
         self.records_dir.mkdir(parents=True, exist_ok=True)
 
         estimate_map = {(item.row, item.col): item for item in estimates}
+        capture_id = self._capture_id(image_rgb, geometry)
         records: list[DatasetRecord] = []
 
         for cell in geometry.cells:
@@ -117,9 +134,15 @@ class DatasetCollector:
                 )
 
             existing_labels: dict[str, str] | None = None
+            existing_capture_ids: tuple[str, ...] = ()
             if record_path.exists():
                 try:
                     existing = json.loads(record_path.read_text(encoding="utf-8"))
+                    capture_ids = existing.get("capture_ids")
+                    if isinstance(capture_ids, list):
+                        existing_capture_ids = tuple(
+                            str(item) for item in capture_ids if item
+                        )
                     labels = existing.get("labels")
                     if isinstance(labels, dict):
                         existing_labels = {
@@ -135,6 +158,9 @@ class DatasetCollector:
                 row=cell.row,
                 col=cell.col,
                 source=source,
+                capture_ids=tuple(
+                    dict.fromkeys((*existing_capture_ids, capture_id))
+                ),
                 suggested=self._suggested(estimate),
                 labels=existing_labels,
             )
