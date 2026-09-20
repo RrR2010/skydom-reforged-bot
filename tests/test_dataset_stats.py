@@ -1,1 +1,126 @@
-"""Tests for dataset statistics and validation."""\n\nfrom __future__ import annotations\n\nimport json\n\nfrom skydom_bot.dataset.stats import collect_dataset_statistics\n\n\ndef _write_record(root, sample_id: str, *, labels) -> None:\n    image_rel = f"input/images/{sample_id}.png"\n    image_path = root / image_rel\n    image_path.parent.mkdir(parents=True, exist_ok=True)\n    image_path.write_bytes(b"fixture")\n\n    records_dir = root / "records"\n    records_dir.mkdir(parents=True, exist_ok=True)\n    (records_dir / f"{sample_id}.json").write_text(\n        json.dumps(\n            {\n                "sample_id": sample_id,\n                "image": image_rel,\n                "row": 0,\n                "col": 0,\n                "source": "unit-test",\n                "suggested": {\n                    "color": {"value": "red", "confidence": 1.0},\n                    "kind": {"value": "normal", "confidence": 1.0},\n                    "blocker": {"value": "none", "confidence": 1.0},\n                    "powerup": {"value": "none", "confidence": 1.0},\n                },\n                "labels": labels,\n            }\n        ),\n        encoding="utf-8",\n    )\n\n\ndef test_statistics_count_only_human_labels(tmp_path) -> None:\n    _write_record(\n        tmp_path,\n        "labeled-a",\n        labels={\n            "color": "green",\n            "kind": "normal",\n            "blocker": "none",\n            "powerup": "flyer",\n        },\n    )\n    _write_record(tmp_path, "unlabeled", labels=None)\n    _write_record(\n        tmp_path,\n        "labeled-b",\n        labels={\n            "color": "green",\n            "kind": "carrot",\n            "blocker": "chain",\n            "powerup": "color-remover",\n        },\n    )\n\n    stats = collect_dataset_statistics(tmp_path)\n\n    assert stats.total == 3\n    assert stats.labeled == 2\n    assert stats.unlabeled == 1\n    assert stats.invalid == 0\n    assert stats.distributions["color"] == {"green": 2}\n    assert stats.distributions["kind"] == {"carrot": 1, "normal": 1}\n    assert stats.distributions["blocker"] == {"chain": 1, "none": 1}\n    assert stats.distributions["powerup"] == {"color-remover": 1, "flyer": 1}\n\n\ndef test_statistics_reject_partial_or_unknown_human_labels(tmp_path) -> None:\n    _write_record(\n        tmp_path,\n        "partial",\n        labels={\n            "color": "blue",\n            "kind": "normal",\n            "blocker": "none",\n        },\n    )\n    _write_record(\n        tmp_path,\n        "invalid-value",\n        labels={\n            "color": "cyan",\n            "kind": "normal",\n            "blocker": "none",\n            "powerup": "none",\n        },\n    )\n\n    stats = collect_dataset_statistics(tmp_path)\n\n    assert stats.total == 2\n    assert stats.labeled == 0\n    assert stats.unlabeled == 0\n    assert stats.invalid == 2\n    assert len(stats.issues) == 2\n\n\ndef test_statistics_report_missing_image_without_promoting_suggestion(tmp_path) -> None:\n    records_dir = tmp_path / "records"\n    records_dir.mkdir(parents=True)\n    (records_dir / "sample.json").write_text(\n        json.dumps(\n            {\n                "sample_id": "sample",\n                "image": "input/images/missing.png",\n                "suggested": {\n                    "color": {"value": "purple", "confidence": 1.0},\n                },\n                "labels": None,\n            }\n        ),\n        encoding="utf-8",\n    )\n\n    stats = collect_dataset_statistics(tmp_path)\n\n    assert stats.unlabeled == 1\n    assert stats.labeled == 0\n    assert stats.distributions["color"] == {}\n    assert any("image does not exist" in issue.message for issue in stats.issues)\n
+"""Tests for dataset statistics and validation."""
+
+from __future__ import annotations
+
+import json
+
+from skydom_bot.dataset.stats import collect_dataset_statistics
+
+
+def _write_record(root, sample_id: str, *, labels) -> None:
+    image_rel = f"input/images/{sample_id}.png"
+    image_path = root / image_rel
+    image_path.parent.mkdir(parents=True, exist_ok=True)
+    image_path.write_bytes(b"fixture")
+
+    records_dir = root / "records"
+    records_dir.mkdir(parents=True, exist_ok=True)
+    (records_dir / f"{sample_id}.json").write_text(
+        json.dumps(
+            {
+                "sample_id": sample_id,
+                "image": image_rel,
+                "row": 0,
+                "col": 0,
+                "source": "unit-test",
+                "suggested": {
+                    "color": {"value": "red", "confidence": 1.0},
+                    "kind": {"value": "normal", "confidence": 1.0},
+                    "blocker": {"value": "none", "confidence": 1.0},
+                    "powerup": {"value": "none", "confidence": 1.0},
+                },
+                "labels": labels,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_statistics_count_only_human_labels(tmp_path) -> None:
+    _write_record(
+        tmp_path,
+        "labeled-a",
+        labels={
+            "color": "green",
+            "kind": "normal",
+            "blocker": "none",
+            "powerup": "flyer",
+        },
+    )
+    _write_record(tmp_path, "unlabeled", labels=None)
+    _write_record(
+        tmp_path,
+        "labeled-b",
+        labels={
+            "color": "green",
+            "kind": "carrot",
+            "blocker": "chain",
+            "powerup": "color-remover",
+        },
+    )
+
+    stats = collect_dataset_statistics(tmp_path)
+
+    assert stats.total == 3
+    assert stats.labeled == 2
+    assert stats.unlabeled == 1
+    assert stats.invalid == 0
+    assert stats.distributions["color"] == {"green": 2}
+    assert stats.distributions["kind"] == {"carrot": 1, "normal": 1}
+    assert stats.distributions["blocker"] == {"chain": 1, "none": 1}
+    assert stats.distributions["powerup"] == {"color-remover": 1, "flyer": 1}
+
+
+def test_statistics_reject_partial_or_unknown_human_labels(tmp_path) -> None:
+    _write_record(
+        tmp_path,
+        "partial",
+        labels={
+            "color": "blue",
+            "kind": "normal",
+            "blocker": "none",
+        },
+    )
+    _write_record(
+        tmp_path,
+        "invalid-value",
+        labels={
+            "color": "cyan",
+            "kind": "normal",
+            "blocker": "none",
+            "powerup": "none",
+        },
+    )
+
+    stats = collect_dataset_statistics(tmp_path)
+
+    assert stats.total == 2
+    assert stats.labeled == 0
+    assert stats.unlabeled == 0
+    assert stats.invalid == 2
+    assert len(stats.issues) == 2
+
+
+def test_statistics_report_missing_image_without_promoting_suggestion(tmp_path) -> None:
+    records_dir = tmp_path / "records"
+    records_dir.mkdir(parents=True)
+    (records_dir / "sample.json").write_text(
+        json.dumps(
+            {
+                "sample_id": "sample",
+                "image": "input/images/missing.png",
+                "suggested": {
+                    "color": {"value": "purple", "confidence": 1.0},
+                },
+                "labels": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    stats = collect_dataset_statistics(tmp_path)
+
+    assert stats.unlabeled == 1
+    assert stats.labeled == 0
+    assert stats.distributions["color"] == {}
+    assert any("image does not exist" in issue.message for issue in stats.issues)
