@@ -26,12 +26,6 @@ _ALLOWED_VALUES: dict[str, frozenset[str]] = {
     "blocker": frozenset(item.value for item in TileBlocker),
     "powerup": frozenset(item.value for item in TilePowerup),
 }
-_REAL_COLORS = tuple(
-    item.value for item in TileColor if item not in {TileColor.NONE, TileColor.UNKNOWN}
-)
-_REAL_POWERUPS = tuple(
-    item.value for item in TilePowerup if item not in {TilePowerup.NONE, TilePowerup.UNKNOWN}
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,35 +37,8 @@ class DatasetIssue:
 
 
 @dataclass(frozen=True, slots=True)
-class CoverageGap:
-    """One underrepresented actionable label combination."""
-
-    dimensions: tuple[tuple[str, str], ...]
-    count: int
-    target: int
-
-    @property
-    def gap(self) -> int:
-        """Return the remaining samples needed to reach the target."""
-        return max(0, self.target - self.count)
-
-    @property
-    def status(self) -> str:
-        """Return a coarse collection-priority status."""
-        if self.count == 0:
-            return "critical"
-        if self.count < 10:
-            return "very-low"
-        if self.count < 25:
-            return "low"
-        if self.count < 50:
-            return "ok"
-        return "well-represented"
-
-
-@dataclass(frozen=True, slots=True)
 class DatasetStatistics:
-    """Aggregate counts and collection coverage from canonical dataset records."""
+    """Aggregate counts and diversity evidence from canonical dataset records."""
 
     total: int
     labeled: int
@@ -79,10 +46,12 @@ class DatasetStatistics:
     invalid: int
     with_capture_provenance: int
     without_capture_provenance: int
+    labeled_with_capture_provenance: int
     distributions: dict[str, dict[str, int]]
+    capture_distributions: dict[str, dict[str, int]]
     pair_distributions: dict[str, dict[str, dict[str, int]]]
+    pair_capture_distributions: dict[str, dict[str, dict[str, int]]]
     combinations: dict[str, int]
-    powerup_color_gaps: tuple[CoverageGap, ...]
     issues: tuple[DatasetIssue, ...]
 
 
@@ -115,6 +84,20 @@ def _validate_labels(labels: Any) -> tuple[dict[str, str] | None, str | None]:
     return normalized, None
 
 
+def _capture_ids(payload: dict[str, Any]) -> tuple[str, ...]:
+    """Return normalized unique capture IDs from one canonical record."""
+    value = payload.get("capture_ids")
+    if not isinstance(value, list):
+        return ()
+    return tuple(
+        dict.fromkeys(
+            str(item)
+            for item in value
+            if isinstance(item, str) and item
+        )
+    )
+
+
 def _pair_name(first: str, second: str) -> str:
     """Return the stable display/storage name for one field pair."""
     return f"{first}×{second}"
@@ -134,68 +117,42 @@ def _empty_statistics() -> DatasetStatistics:
         invalid=0,
         with_capture_provenance=0,
         without_capture_provenance=0,
+        labeled_with_capture_provenance=0,
         distributions={field: {} for field in _LABEL_FIELDS},
+        capture_distributions={field: {} for field in _LABEL_FIELDS},
         pair_distributions={_pair_name(*pair): {} for pair in _PAIR_FIELDS},
+        pair_capture_distributions={_pair_name(*pair): {} for pair in _PAIR_FIELDS},
         combinations={},
-        powerup_color_gaps=(),
         issues=(),
     )
 
 
-def _build_powerup_color_gaps(
-    pair_counts: dict[str, dict[str, Counter[str]]],
-    *,
-    target_per_combination: int,
-) -> tuple[CoverageGap, ...]:
-    """Build collection priorities for real power-up/color combinations."""
-    matrix = pair_counts[_pair_name("powerup", "color")]
-    gaps = [
-        CoverageGap(
-            dimensions=(("powerup", powerup), ("color", color)),
-            count=matrix.get(powerup, Counter()).get(color, 0),
-            target=target_per_combination,
-        )
-        for powerup in _REAL_POWERUPS
-        for color in _REAL_COLORS
-    ]
-    return tuple(
-        sorted(
-            gaps,
-            key=lambda item: (
-                -item.gap,
-                item.count,
-                dict(item.dimensions)["powerup"],
-                dict(item.dimensions)["color"],
-            ),
-        )
-    )
-
-
-def collect_dataset_statistics(
-    root: Path = Path("dataset"),
-    *,
-    target_per_combination: int = 30,
-) -> DatasetStatistics:
-    """Scan canonical records and summarize human ground-truth coverage.
+def collect_dataset_statistics(root: Path = Path("dataset")) -> DatasetStatistics:
+    """Scan canonical records and summarize human ground truth and diversity.
 
     Bootstrap predictions under suggested are intentionally ignored.
-    target_per_combination is used only for collection-priority guidance.
+    Capture IDs are treated as provenance groups, not as extra samples.
     """
-    if target_per_combination < 1:
-        raise ValueError("target_per_combination must be >= 1")
-
     records_dir = root / "records"
     if not records_dir.exists():
         return _empty_statistics()
 
     counters = {field: Counter() for field in _LABEL_FIELDS}
+    capture_sets: dict[str, dict[str, set[str]]] = {
+        field: defaultdict(set) for field in _LABEL_FIELDS
+    }
     pair_counts: dict[str, dict[str, Counter[str]]] = {
         _pair_name(*pair): defaultdict(Counter) for pair in _PAIR_FIELDS
+    }
+    pair_capture_sets: dict[str, dict[str, dict[str, set[str]]]] = {
+        _pair_name(*pair): defaultdict(lambda: defaultdict(set))
+        for pair in _PAIR_FIELDS
     }
     combination_counts: Counter[str] = Counter()
     issues: list[DatasetIssue] = []
     total = labeled = unlabeled = invalid = 0
     with_capture_provenance = without_capture_provenance = 0
+    labeled_with_capture_provenance = 0
 
     for path in sorted(records_dir.glob("*.json")):
         total += 1
@@ -211,11 +168,8 @@ def collect_dataset_statistics(
             issues.append(DatasetIssue(path, "record root must be an object"))
             continue
 
-        capture_ids = payload.get("capture_ids")
-        if (
-            isinstance(capture_ids, list)
-            and any(isinstance(item, str) and item for item in capture_ids)
-        ):
+        record_capture_ids = _capture_ids(payload)
+        if record_capture_ids:
             with_capture_provenance += 1
         else:
             without_capture_provenance += 1
@@ -245,16 +199,34 @@ def collect_dataset_statistics(
             continue
 
         labeled += 1
+        if record_capture_ids:
+            labeled_with_capture_provenance += 1
+
         for field, value in labels.items():
             counters[field][value] += 1
+            capture_sets[field][value].update(record_capture_ids)
 
         for first, second in _PAIR_FIELDS:
-            pair_counts[_pair_name(first, second)][labels[first]][labels[second]] += 1
+            pair_name = _pair_name(first, second)
+            first_value = labels[first]
+            second_value = labels[second]
+            pair_counts[pair_name][first_value][second_value] += 1
+            pair_capture_sets[pair_name][first_value][second_value].update(
+                record_capture_ids
+            )
+
         combination_counts[_combination_key(labels)] += 1
 
     distributions = {
         field: dict(sorted(counter.items()))
         for field, counter in counters.items()
+    }
+    capture_distributions = {
+        field: {
+            value: len(ids)
+            for value, ids in sorted(values.items())
+        }
+        for field, values in capture_sets.items()
     }
     pair_distributions = {
         name: {
@@ -262,6 +234,16 @@ def collect_dataset_statistics(
             for first_value, second_counts in sorted(rows.items())
         }
         for name, rows in pair_counts.items()
+    }
+    pair_capture_distributions = {
+        name: {
+            first_value: {
+                second_value: len(ids)
+                for second_value, ids in sorted(second_values.items())
+            }
+            for first_value, second_values in sorted(rows.items())
+        }
+        for name, rows in pair_capture_sets.items()
     }
 
     return DatasetStatistics(
@@ -271,12 +253,11 @@ def collect_dataset_statistics(
         invalid=invalid,
         with_capture_provenance=with_capture_provenance,
         without_capture_provenance=without_capture_provenance,
+        labeled_with_capture_provenance=labeled_with_capture_provenance,
         distributions=distributions,
+        capture_distributions=capture_distributions,
         pair_distributions=pair_distributions,
+        pair_capture_distributions=pair_capture_distributions,
         combinations=dict(sorted(combination_counts.items())),
-        powerup_color_gaps=_build_powerup_color_gaps(
-            pair_counts,
-            target_per_combination=target_per_combination,
-        ),
         issues=tuple(issues),
     )
