@@ -99,6 +99,7 @@ def test_diagnostics_expose_pitch_signals_and_cell_evidence() -> None:
     assert float(diagnostics.occupancy.min()) >= 0.0
     assert diagnostics.evidence_state.shape == diagnostics.occupancy.shape
     assert diagnostics.cardinal_support.shape == diagnostics.occupancy.shape
+    assert diagnostics.center_tile_evidence.shape == diagnostics.occupancy.shape
     assert diagnostics.reconciled_topology.shape == diagnostics.occupancy.shape
 
 
@@ -230,3 +231,47 @@ def test_small_high_evidence_island_is_preserved() -> None:
     assert sorted(sizes) == [1, 15]
     assert min(means) > 0.90
     assert bool(selected[0, 4])
+
+
+def test_assisted_reconciliation_recovers_blocked_edge_cell_with_tile_evidence() -> None:
+    detector = BoardDetector()
+    occupancy = np.array(
+        [
+            [0.00, 0.00, 0.00],
+            [0.00, 0.92, 0.31],
+            [0.00, 0.97, 0.99],
+        ],
+        dtype=np.float32,
+    )
+    center = np.array(
+        [
+            [0.00, 0.00, 0.00],
+            [0.00, 0.90, 0.82],
+            [0.00, 0.88, 0.91],
+        ],
+        dtype=np.float32,
+    )
+
+    state, support, topology = detector._reconcile_topology(occupancy, center)
+
+    assert int(state[1, 2]) == 1
+    assert int(support[1, 2]) == 2
+    assert bool(topology[1, 2])
+
+
+def test_assisted_reconciliation_does_not_fill_gap_without_tile_evidence() -> None:
+    detector = BoardDetector()
+    occupancy = np.array(
+        [
+            [0.95, 0.95, 0.95],
+            [0.95, 0.32, 0.00],
+            [0.95, 0.95, 0.00],
+        ],
+        dtype=np.float32,
+    )
+    center = np.zeros_like(occupancy)
+
+    _, support, topology = detector._reconcile_topology(occupancy, center)
+
+    assert int(support[1, 1]) >= 2
+    assert not bool(topology[1, 1])
