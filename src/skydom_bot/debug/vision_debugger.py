@@ -544,9 +544,9 @@ def _save_steps(context: DebugContext, directory: Path) -> None:
 def build_parser() -> argparse.ArgumentParser:
     """Build CLI arguments for the visual debugger."""
     parser = argparse.ArgumentParser(description="Visualize each stage of Skydom board detection.")
-    source = parser.add_mutually_exclusive_group(required=True)
+    source = parser.add_mutually_exclusive_group()
     source.add_argument("--image", type=Path, help="Input screenshot path.")
-    source.add_argument("--screen", action="store_true", help="Capture a monitor.")
+    source.add_argument("--screen", action="store_true", help="Capture a monitor (default when --image is omitted).")
     parser.add_argument("--monitor", type=int, default=1, help="MSS monitor index used with --screen.")
     parser.add_argument(
         "--save-steps",
