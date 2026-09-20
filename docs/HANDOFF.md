@@ -57,7 +57,7 @@ dataset/
 
 `DatasetCollector` now writes directly to `dataset/input/images`.
 
-Latest local validation: full `pytest` passed with 50 tests. Real dataset statistics at that point were 109 labeled / 0 unlabeled / 0 invalid records. The blocker head was still entirely `none`, so more blocker examples remain a priority.
+Latest confirmed local validation before the capture-provenance commits: full `pytest` passed with 50 tests. Re-run the suite after pulling the provenance changes. Real dataset statistics at that point were 109 labeled / 0 unlabeled / 0 invalid records. The blocker head was still entirely `none`, so more blocker examples remain a priority.
 
 Dataset statistics/validation is available with:
 
