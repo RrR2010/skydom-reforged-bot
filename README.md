@@ -657,7 +657,23 @@ You can also configure it numerically:
 skydom-capture-screen --configure --region 190,163,1016,534
 ```
 
-Then keep a terminal beside the game and manually trigger one capture whenever a useful stage/state is visible:
+For high-volume manual capture, open the compact side panel:
+
+```powershell
+skydom-capture-gui
+```
+
+The narrow Tkinter form stays on top by default and keeps its values after each capture. It also restores the last values on the next launch from `corpus/capture-form.json`. The fixed fields are:
+
+- stage ID;
+- mode;
+- initial moves;
+- board variant;
+- has ice.
+
+Four additional name/value rows accept arbitrary metadata. Extra rows cannot overwrite the fixed metadata keys. Press **CAPTURE** or **Ctrl+Enter** to append another screenshot; repeated captures of the same stage and metadata remain separate observations.
+
+The CLI remains available for scripted or occasional captures:
 
 ```powershell
 skydom-capture-screen level-27
