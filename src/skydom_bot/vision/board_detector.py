@@ -32,9 +32,9 @@ class BoardDetectorConfig:
     ice_saturation_min: int = 35
     ice_value_min: int = 100
 
-    min_component_area_ratio: float = 0.03
-    min_fragment_area_ratio: float = 0.005
-    component_join_gap_ratio: float = 0.03
+    min_component_area_ratio: float = 0.015
+    min_fragment_area_ratio: float = 0.001
+    component_join_gap_ratio: float = 0.07
     component_projection_overlap: float = 0.50
 
     pitch_min_px: int = 28
@@ -211,7 +211,15 @@ class BoardDetector:
         )
 
     def _board_component(self, mask: UInt8Image) -> tuple[Rect, UInt8Image]:
-        """Group nearby board-colored fragments without painting over occlusion."""
+        """Group nearby board-colored fragments without painting over occlusion.
+
+        Some levels deliberately split the playable board into separate islands.
+        Those islands can be one full cell pitch apart and individually much
+        smaller than the whole board. We therefore admit smaller fragments and
+        join aligned neighbors across a larger gap. Later logical-topology
+        selection rejects unrelated or miniature boards more safely than an
+        aggressive early area threshold can.
+        """
         count, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
         if count <= 1:
             raise BoardDetectionError("No board-colored connected component was found.")
