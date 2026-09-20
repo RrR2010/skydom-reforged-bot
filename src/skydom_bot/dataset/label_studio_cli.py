@@ -1,16 +1,16 @@
-"""CLI for exporting the crop dataset to Label Studio."""
+"""CLI for exporting the crop dataset to Label Studio storage folders."""
 
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
 
-from skydom_bot.dataset.label_studio import export_label_studio
+from skydom_bot.dataset.label_studio import export_label_studio_storage
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Export local tile crops and bootstrap predictions to Label Studio."
+        description="Export incremental Label Studio source tasks and target folders."
     )
     parser.add_argument("--dataset", type=Path, default=Path("dataset"))
     parser.add_argument("--output", type=Path)
@@ -19,13 +19,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
-    config_path, tasks_path, count = export_label_studio(
-        args.dataset,
-        args.output,
-    )
-    print(f"Tasks exported: {count}")
-    print(f"Label config: {config_path}")
-    print(f"Tasks JSON: {tasks_path}")
+    summary = export_label_studio_storage(args.dataset, args.output)
+
+    print(f"Task definitions total: {summary.total}")
+    print(f"New task files created: {summary.created}")
+    print(f"Existing task files kept: {summary.existing}")
+    print(f"Label config: {summary.config_path}")
+    print(f"Source tasks directory: {summary.source_tasks_dir}")
+    print(f"Target annotations directory: {summary.target_dir}")
     return 0
 
 
