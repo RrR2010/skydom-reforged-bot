@@ -32,6 +32,8 @@ def main() -> int:
     print(f"Labeled: {stats.labeled}")
     print(f"Unlabeled: {stats.unlabeled}")
     print(f"Invalid labels/records: {stats.invalid}")
+    print(f"With capture provenance: {stats.with_capture_provenance}")
+    print(f"Legacy without capture provenance: {stats.without_capture_provenance}")
 
     for field, counts in stats.distributions.items():
         rendered = ", ".join(f"{name}={count}" for name, count in counts.items())
