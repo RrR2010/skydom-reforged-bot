@@ -72,3 +72,12 @@
 **Decision:** newly collected sample records store one or more `capture_ids`, derived from the detected board crop and logical topology.
 
 **Reason:** random crop-level splitting can leak near-identical visual context from one board capture into both training and validation. Samples may also be de-duplicated across multiple captures, so provenance is accumulated rather than overwritten. Legacy records without capture provenance remain valid training data but are not considered safe held-out validation data unless provenance is recovered.
+
+
+## ADR-013 — Distinguish not-applicable from unknown semantic state
+
+**Decision:** reserve `unknown` for genuine recognition/annotation uncertainty and use explicit `none` values when a semantic dimension is known not to apply. Add `none` to color and kind, and add `adjacent-clear` to blockers for whole-cell obstacles removed by an adjacent match.
+
+**Reason:** a known absence is training signal, not uncertainty. Treating a non-matchable obstacle as `color=unknown` / `kind=unknown` would teach the learned model that the sample is ambiguous when its semantics are actually known. The intended representation for the observed whole-cell obstacle is `color=none`, `kind=none`, `blocker=adjacent-clear`, `powerup=none`.
+
+**Compatibility:** code enums, Label Studio configuration, importer validation, statistics validation, and tests must be synchronized before these new labels are committed as human ground truth. Until that synchronization is complete, such samples should be skipped/deferred rather than intentionally mislabeled as `unknown`.
