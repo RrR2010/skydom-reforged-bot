@@ -7,8 +7,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from skydom_bot.domain.tile import TileColor
+from skydom_bot.domain.tile_semantics import TileBlocker, TileKind, TilePowerup
+
 
 _LABEL_FIELDS = ("color", "kind", "blocker", "powerup")
+_ALLOWED_VALUES: dict[str, frozenset[str]] = {
+    "color": frozenset(item.value for item in TileColor),
+    "kind": frozenset(item.value for item in TileKind),
+    "blocker": frozenset(item.value for item in TileBlocker),
+    "powerup": frozenset(item.value for item in TilePowerup),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +62,8 @@ def _labels_from_annotation(annotation: dict[str, Any]) -> dict[str, str] | None
             labels[str(from_name)] = choice
 
     if not labels or any(name not in labels for name in _LABEL_FIELDS):
+        return None
+    if any(labels[name] not in _ALLOWED_VALUES[name] for name in _LABEL_FIELDS):
         return None
     return labels
 
