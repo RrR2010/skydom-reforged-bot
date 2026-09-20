@@ -38,10 +38,15 @@ _TOPICS: dict[str, str] = {
         New crops are written directly to dataset/input/images/.
     """),
     "stats": dedent("""
-        Summarize human-label coverage and validate canonical dataset records.
+        Summarize dataset health and generate a training-readiness report.
 
           skydom-dataset-stats
+          skydom-dataset-stats --details
           skydom-dataset-stats --strict
+
+        Console output stays compact. By default a Markdown report is written
+        to dataset/dataset-stats.md with collection guidance, coverage bands,
+        capture-group provenance, and the recommended first-training floors.
 
         Bootstrap predictions under suggested are never counted as labels.
     """),
