@@ -269,6 +269,49 @@ def _render_structural_reconciliation(left: Axes, right: Axes, ctx: DebugContext
             right.text(col, row, symbol, ha="center", va="center", fontsize=9)
 
 
+def _render_component_selection(left: Axes, right: Axes, ctx: DebugContext) -> None:
+    labels = ctx.diagnostics.topology_components
+    selected = ctx.diagnostics.selected_topology
+    sizes = ctx.diagnostics.topology_component_sizes
+
+    left.imshow(labels)
+    left.set_title(
+        "4-connected topology components before board selection\n"
+        f"component sizes={sizes or '(single component)'}"
+    )
+    left.set_xlabel("column")
+    left.set_ylabel("row")
+    for row in range(labels.shape[0]):
+        for col in range(labels.shape[1]):
+            label = int(labels[row, col])
+            left.text(
+                col,
+                row,
+                "." if label == 0 else str(label),
+                ha="center",
+                va="center",
+                fontsize=8,
+            )
+
+    right.imshow(selected, cmap="gray", vmin=0, vmax=1)
+    right.set_title(
+        "Retained player-board topology before normalization\n"
+        "small disconnected replicas are rejected"
+    )
+    right.set_xlabel("column")
+    right.set_ylabel("row")
+    for row in range(selected.shape[0]):
+        for col in range(selected.shape[1]):
+            right.text(
+                col,
+                row,
+                "X" if selected[row, col] else ".",
+                ha="center",
+                va="center",
+                fontsize=8,
+            )
+
+
 def _render_final(left: Axes, right: Axes, ctx: DebugContext) -> None:
     overlay = draw_board_overlay(ctx.image_rgb, ctx.geometry)
     left.imshow(overlay)
@@ -351,8 +394,13 @@ def _steps() -> tuple[DebugStep, ...]:
             _render_structural_reconciliation,
         ),
         DebugStep(
-            "12. Final topology",
-            "The reconciled visual-plus-structural result becomes the discrete grid representation used by later solver layers.",
+            "12. Board component selection",
+            "A screen may contain another Match-3 board, such as an opponent preview. The reconciled logical grid is split into 4-connected components; small disconnected replicas are rejected while comparable islands are preserved.",
+            _render_component_selection,
+        ),
+        DebugStep(
+            "13. Final topology",
+            "The selected player-board component is normalized to its own row/column bounds and becomes the discrete grid representation used by later solver layers.",
             _render_final,
         ),
     )
@@ -468,10 +516,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--start-step",
         type=int,
-        default=10,
+        default=12,
         help=(
-            "1-based debugger step to open first. Defaults to 10 because steps "
-            "1-9 are considered already explored in the current development cycle."
+            "1-based debugger step to open first. Defaults to 12, the latest "
+            "board-selection concept introduced for multi-board competitive levels."
         ),
     )
     parser.add_argument(
