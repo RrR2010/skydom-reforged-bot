@@ -26,9 +26,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Collect de-duplicated tile crops with bootstrap metadata."
     )
-    source = parser.add_mutually_exclusive_group(required=True)
+    source = parser.add_mutually_exclusive_group()
     source.add_argument("--image", type=Path)
-    source.add_argument("--screen", action="store_true")
+    source.add_argument("--screen", action="store_true", help="Capture a monitor (default when --image is omitted).")
     parser.add_argument("--monitor", type=int, default=1)
     parser.add_argument("--dataset", type=Path, default=Path("dataset"))
     return parser
