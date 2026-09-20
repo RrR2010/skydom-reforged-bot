@@ -44,6 +44,7 @@ class BoardDetectorConfig:
     occupancy_threshold: float = 0.50
     occupancy_uncertain_threshold: float = 0.25
     structural_required_cardinal_neighbors: int = 4
+    secondary_component_keep_ratio: float = 0.35
     cell_corner_ratio: float = 0.16
 
 
@@ -77,6 +78,9 @@ class BoardDetectionDiagnostics:
     evidence_state: NDArray[np.uint8]
     cardinal_support: NDArray[np.uint8]
     reconciled_topology: NDArray[np.bool_]
+    topology_components: NDArray[np.int32]
+    topology_component_sizes: tuple[int, ...]
+    selected_topology: NDArray[np.bool_]
 
 
 class BoardDetectionError(RuntimeError):
@@ -126,23 +130,40 @@ class BoardDetector:
         evidence_mask = cv2.bitwise_or(component_mask, ice_mask)
         occupancy = self._cell_occupancy_grid(evidence_mask, bounds, rows, cols, pitch_x, pitch_y)
         evidence_state, cardinal_support, reconciled_topology = self._reconcile_topology(occupancy)
-        cells = self._cells_from_topology(
-            occupancy,
-            reconciled_topology,
+        topology_components, component_sizes, selected_topology = self._select_primary_topology(
+            reconciled_topology
+        )
+
+        (
+            final_bounds,
+            final_occupancy,
+            final_topology,
+            final_pitch_x,
+            final_pitch_y,
+        ) = self._crop_to_selected_topology(
             bounds,
+            occupancy,
+            selected_topology,
             pitch_x,
             pitch_y,
+        )
+        cells = self._cells_from_topology(
+            final_occupancy,
+            final_topology,
+            final_bounds,
+            final_pitch_x,
+            final_pitch_y,
         )
         if not cells:
             raise BoardDetectionError("Board component found, but no active cells were inferred.")
 
-        confidence = self._confidence(bounds, pitch_x, pitch_y, cells)
+        confidence = self._confidence(final_bounds, final_pitch_x, final_pitch_y, cells)
         geometry = BoardGeometry(
-            bounds=bounds,
-            rows=rows,
-            cols=cols,
-            pitch_x=pitch_x,
-            pitch_y=pitch_y,
+            bounds=final_bounds,
+            rows=final_topology.shape[0],
+            cols=final_topology.shape[1],
+            pitch_x=final_pitch_x,
+            pitch_y=final_pitch_y,
             cells=tuple(cells),
             confidence=confidence,
         )
@@ -160,6 +181,9 @@ class BoardDetector:
             evidence_state=evidence_state,
             cardinal_support=cardinal_support,
             reconciled_topology=reconciled_topology,
+            topology_components=topology_components,
+            topology_component_sizes=component_sizes,
+            selected_topology=selected_topology,
         )
         return geometry, diagnostics
 
@@ -415,6 +439,85 @@ class BoardDetector:
         )
         reconciled = strong | promoted
         return state, support, reconciled
+
+    def _select_primary_topology(
+        self,
+        topology: NDArray[np.bool_],
+    ) -> tuple[NDArray[np.int32], tuple[int, ...], NDArray[np.bool_]]:
+        """Separate independent logical board components and reject tiny replicas.
+
+        Competitive levels can show a miniature opponent board near the real
+        player board. Both share the same visual theme, so color segmentation
+        alone can merge them into one large bounding box. After pitch inference,
+        however, the miniature board projects into a sparse secondary component
+        on the player's logical grid.
+
+        We label 4-connected topology components and keep the largest component
+        plus any other component whose size is comparable. This removes small
+        scaled replicas without assuming the real board must be the only island.
+        """
+        count, labels = cv2.connectedComponents(
+            topology.astype(np.uint8),
+            connectivity=4,
+        )
+        if count <= 1:
+            return labels.astype(np.int32), (), topology.copy()
+
+        sizes = tuple(
+            int(np.count_nonzero(labels == label))
+            for label in range(1, count)
+        )
+        if not sizes:
+            return labels.astype(np.int32), (), topology.copy()
+
+        largest = max(sizes)
+        keep_labels = {
+            label
+            for label, size in enumerate(sizes, start=1)
+            if size >= largest * self.config.secondary_component_keep_ratio
+        }
+        selected = np.isin(labels, tuple(keep_labels))
+        return labels.astype(np.int32), sizes, selected.astype(np.bool_)
+
+    @staticmethod
+    def _crop_to_selected_topology(
+        bounds: Rect,
+        occupancy: NDArray[np.float32],
+        topology: NDArray[np.bool_],
+        pitch_x: float,
+        pitch_y: float,
+    ) -> tuple[Rect, NDArray[np.float32], NDArray[np.bool_], float, float]:
+        """Normalize the logical grid around the retained board component."""
+        positions = np.argwhere(topology)
+        if positions.size == 0:
+            return bounds, occupancy, topology, pitch_x, pitch_y
+
+        min_row, min_col = positions.min(axis=0)
+        max_row, max_col = positions.max(axis=0)
+
+        x0 = int(round(float(min_col) * pitch_x))
+        x1 = int(round(float(max_col + 1) * pitch_x))
+        y0 = int(round(float(min_row) * pitch_y))
+        y1 = int(round(float(max_row + 1) * pitch_y))
+
+        cropped_occupancy = occupancy[min_row : max_row + 1, min_col : max_col + 1].copy()
+        cropped_topology = topology[min_row : max_row + 1, min_col : max_col + 1].copy()
+        final_bounds = Rect(
+            bounds.x + x0,
+            bounds.y + y0,
+            x1 - x0,
+            y1 - y0,
+        )
+        rows, cols = cropped_topology.shape
+        final_pitch_x = final_bounds.width / max(1, cols)
+        final_pitch_y = final_bounds.height / max(1, rows)
+        return (
+            final_bounds,
+            cropped_occupancy,
+            cropped_topology,
+            final_pitch_x,
+            final_pitch_y,
+        )
 
     def _cells_from_topology(
         self,
