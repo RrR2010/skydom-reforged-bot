@@ -80,3 +80,19 @@ def test_pitch_prefers_fundamental_over_two_cell_harmonic() -> None:
 
     assert abs(geometry.pitch_x - 60) < 1.5
     assert abs(geometry.pitch_y - 60) < 1.5
+
+
+def test_diagnostics_expose_pitch_signals_and_cell_evidence() -> None:
+    detector = BoardDetector()
+    image = _synthetic_board(rows=8, cols=8, pitch=60)
+
+    geometry, diagnostics = detector.detect_with_diagnostics(image)
+
+    assert diagnostics.crop_rgb.shape[:2] == (geometry.bounds.height, geometry.bounds.width)
+    assert diagnostics.pitch_x.selected_pitch > 0
+    assert diagnostics.pitch_y.selected_pitch > 0
+    assert diagnostics.pitch_x.profile.ndim == 1
+    assert diagnostics.pitch_y.profile.ndim == 1
+    assert diagnostics.occupancy.shape == (geometry.rows, geometry.cols)
+    assert float(diagnostics.occupancy.max()) <= 1.0
+    assert float(diagnostics.occupancy.min()) >= 0.0
