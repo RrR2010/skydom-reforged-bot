@@ -18,6 +18,11 @@ class TilePowerup(str, Enum):
     """Power-up/special modifier independent from base kind and blocker."""
 
     NONE = "none"
+    FLYER = "flyer"
+    ROW = "row"
+    COLUMN = "column"
+    BOMB = "bomb"
+    COLOR_REMOVER = "color-remover"
     UNKNOWN = "unknown"
 
 
