@@ -15,10 +15,12 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from skydom_bot.capture import capture_screen
+from skydom_bot.dataset.collector import DatasetCollector
 from skydom_bot.debug.report import format_geometry_summary, save_board_overlay
 from skydom_bot.domain.board import BoardGeometry, Cell
 from skydom_bot.domain.tile import TileColor, TileObservation
 from skydom_bot.domain.tile_semantics import TileBlocker, TileKind, TileSemanticObservation
+from skydom_bot.domain.tile_state import TileStateEstimate
 from skydom_bot.vision.board_detector import BoardDetector
 from skydom_bot.vision.shape_features import ShapeDiagnostics, extract_shape_features
 from skydom_bot.vision.tile_classifier import TileClassifier, TileDiagnostics
@@ -91,12 +93,14 @@ class TileDebugger:
         classifier: TileClassifier,
         observations: tuple[TileObservation, ...],
         compare_output: Path,
+        dataset_root: Path,
     ) -> None:
         self.image_rgb = image_rgb
         self.geometry = geometry
         self.classifier = classifier
         self.observations = observations
         self.compare_output = compare_output
+        self.dataset_root = dataset_root
 
         self.by_cell = {(item.row, item.col): item for item in observations}
         self.cells = geometry.cell_map
@@ -277,12 +281,57 @@ class TileDebugger:
             self.save_comparison()
             return
 
+        if key == "e":
+            self.export_selected_dataset()
+            return
+
         if key in {str(index) for index in range(1, self.max_selected + 1)}:
             index = int(key) - 1
             if index < len(self.selected_keys):
                 self.focused_key = self.selected_keys[index]
                 self.status_text = ""
                 self.render()
+
+    def _state_estimate(self, snapshot: TileSnapshot) -> TileStateEstimate | None:
+        """Convert one debugger snapshot into the recognizer-neutral contract."""
+        semantic = snapshot.semantics
+        if semantic is None:
+            return None
+        return TileStateEstimate(
+            row=snapshot.observation.row,
+            col=snapshot.observation.col,
+            color=snapshot.observation.color,
+            color_confidence=snapshot.observation.confidence,
+            kind=semantic.kind,
+            kind_confidence=semantic.kind_confidence,
+            blocker=semantic.blocker,
+            blocker_confidence=semantic.blocker_confidence,
+            powerup=semantic.powerup,
+            powerup_confidence=semantic.powerup_confidence,
+        )
+
+    def export_selected_dataset(self) -> None:
+        """Export selected cells as unlabeled samples with bootstrap suggestions."""
+        if not self.selected_keys:
+            self.status_text = "No selected cells to export."
+            self.render()
+            return
+
+        estimates = tuple(
+            estimate
+            for key in self.selected_keys
+            if (estimate := self._state_estimate(self._snapshot(key))) is not None
+        )
+        records = DatasetCollector(self.dataset_root).collect(
+            self.image_rgb,
+            self.geometry,
+            estimates,
+            source="tile-debugger",
+            only_cells=set(self.selected_keys),
+        )
+        self.status_text = f"Exported {len(records)} samples to {self.dataset_root}"
+        print(self.status_text)
+        self.render()
 
     def save_comparison(self) -> None:
         """Save the current composite debugger view as a shareable PNG."""
@@ -299,7 +348,7 @@ class TileDebugger:
         self.board_ax.imshow(board_crop)
         self.board_ax.set_title(
             "Board crop — click = focus | Ctrl+click/right-click = compare\n"
-            "C = clear | 1..6 = focus selected | S = save composite"
+            "C = clear | 1..6 = focus selected | S = save composite | E = export dataset"
         )
         self.board_ax.set_axis_off()
 
@@ -554,6 +603,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Standard board geometry overlay path.",
     )
     parser.add_argument(
+        "--dataset",
+        type=Path,
+        default=Path("dataset"),
+        help="Local dataset root used when E exports selected cells.",
+    )
+    parser.add_argument(
         "--compare-output",
         type=Path,
         default=Path("artifacts/tile-compare.png"),
@@ -587,6 +642,7 @@ def main() -> int:
         classifier,
         observations,
         compare_output=args.compare_output,
+        dataset_root=args.dataset,
     ).show()
     return 0
 
