@@ -98,3 +98,56 @@ def test_import_skips_partial_annotation(tmp_path) -> None:
     summary = import_label_studio_annotations(dataset)
     assert summary.records_updated == 0
     assert summary.skipped_without_annotation == 1
+
+
+def test_import_reads_extensionless_local_target_storage_file(tmp_path) -> None:
+    dataset = tmp_path / "dataset"
+    records = dataset / "records"
+    annotations = dataset / "output" / "annotations"
+    records.mkdir(parents=True)
+    annotations.mkdir(parents=True)
+
+    record_path = records / "018c99bad20be95d1ef1.json"
+    record_path.write_text(
+        json.dumps({
+            "sample_id": "018c99bad20be95d1ef1",
+            "image": "input/images/018c99bad20be95d1ef1.png",
+            "suggested": {"color": {"value": "blue", "confidence": 0.5}},
+            "labels": None,
+        }),
+        encoding="utf-8",
+    )
+
+    payload = {
+        "id": 3,
+        "result": [
+            {"from_name": "color", "to_name": "image", "type": "choices", "value": {"choices": ["green"]}},
+            {"from_name": "kind", "to_name": "image", "type": "choices", "value": {"choices": ["normal"]}},
+            {"from_name": "blocker", "to_name": "image", "type": "choices", "value": {"choices": ["none"]}},
+            {"from_name": "powerup", "to_name": "image", "type": "choices", "value": {"choices": ["none"]}},
+        ],
+        "task": {
+            "id": 225,
+            "data": {
+                "image": "/data/local-files/?d=input/images/018c99bad20be95d1ef1.png",
+                "sample_id": "018c99bad20be95d1ef1",
+            },
+        },
+        "created_at": "2026-09-20T05:59:52.274375Z",
+        "updated_at": "2026-09-20T05:59:52.274375Z",
+    }
+    (annotations / "3").write_text(json.dumps(payload), encoding="utf-8")
+
+    summary = import_label_studio_annotations(dataset)
+
+    assert summary.files_seen == 1
+    assert summary.tasks_with_sample_id == 1
+    assert summary.records_updated == 1
+    updated = json.loads(record_path.read_text(encoding="utf-8"))
+    assert updated["labels"] == {
+        "color": "green",
+        "kind": "normal",
+        "blocker": "none",
+        "powerup": "none",
+    }
+    assert updated["suggested"]["color"]["value"] == "blue"
