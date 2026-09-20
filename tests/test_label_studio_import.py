@@ -151,3 +151,64 @@ def test_import_reads_extensionless_local_target_storage_file(tmp_path) -> None:
         "powerup": "none",
     }
     assert updated["suggested"]["color"]["value"] == "blue"
+
+
+def test_import_accepts_adjacent_clear_obstacle_labels(tmp_path) -> None:
+    dataset = tmp_path / "dataset"
+    records = dataset / "records"
+    annotations = dataset / "output" / "annotations"
+    records.mkdir(parents=True)
+    annotations.mkdir(parents=True)
+
+    record_path = records / "obstacle.json"
+    record_path.write_text(
+        json.dumps({
+            "sample_id": "obstacle",
+            "labels": None,
+            "suggested": {
+                "color": {"value": "orange", "confidence": 0.8},
+                "kind": {"value": "normal", "confidence": 0.6},
+            },
+        }),
+        encoding="utf-8",
+    )
+    task = _annotation_task("obstacle")
+    replacements = {
+        "color": "none",
+        "kind": "none",
+        "blocker": "adjacent-clear",
+        "powerup": "none",
+    }
+    for result in task["annotations"][0]["result"]:
+        result["value"]["choices"] = [replacements[result["from_name"]]]
+    (annotations / "obstacle.json").write_text(json.dumps(task), encoding="utf-8")
+
+    summary = import_label_studio_annotations(dataset)
+
+    assert summary.records_updated == 1
+    updated = json.loads(record_path.read_text(encoding="utf-8"))
+    assert updated["labels"] == replacements
+    assert updated["suggested"]["color"]["value"] == "orange"
+
+
+def test_import_rejects_choice_outside_taxonomy(tmp_path) -> None:
+    dataset = tmp_path / "dataset"
+    records = dataset / "records"
+    annotations = dataset / "output" / "annotations"
+    records.mkdir(parents=True)
+    annotations.mkdir(parents=True)
+
+    record_path = records / "bad.json"
+    record_path.write_text(
+        json.dumps({"sample_id": "bad", "labels": None, "suggested": {}}),
+        encoding="utf-8",
+    )
+    task = _annotation_task("bad")
+    task["annotations"][0]["result"][0]["value"]["choices"] = ["brown"]
+    (annotations / "bad.json").write_text(json.dumps(task), encoding="utf-8")
+
+    summary = import_label_studio_annotations(dataset)
+
+    assert summary.records_updated == 0
+    assert summary.skipped_without_annotation == 1
+    assert json.loads(record_path.read_text(encoding="utf-8"))["labels"] is None
