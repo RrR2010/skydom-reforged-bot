@@ -45,6 +45,7 @@ class BoardDetectorConfig:
     occupancy_uncertain_threshold: float = 0.25
     structural_required_cardinal_neighbors: int = 4
     secondary_component_keep_ratio: float = 0.35
+    secondary_component_min_mean_evidence: float = 0.80
     cell_corner_ratio: float = 0.16
 
 
@@ -80,6 +81,7 @@ class BoardDetectionDiagnostics:
     reconciled_topology: NDArray[np.bool_]
     topology_components: NDArray[np.int32]
     topology_component_sizes: tuple[int, ...]
+    topology_component_mean_evidence: tuple[float, ...]
     selected_topology: NDArray[np.bool_]
 
 
@@ -130,9 +132,12 @@ class BoardDetector:
         evidence_mask = cv2.bitwise_or(component_mask, ice_mask)
         occupancy = self._cell_occupancy_grid(evidence_mask, bounds, rows, cols, pitch_x, pitch_y)
         evidence_state, cardinal_support, reconciled_topology = self._reconcile_topology(occupancy)
-        topology_components, component_sizes, selected_topology = self._select_primary_topology(
-            reconciled_topology
-        )
+        (
+            topology_components,
+            component_sizes,
+            component_mean_evidence,
+            selected_topology,
+        ) = self._select_primary_topology(reconciled_topology, occupancy)
 
         (
             final_bounds,
@@ -183,6 +188,7 @@ class BoardDetector:
             reconciled_topology=reconciled_topology,
             topology_components=topology_components,
             topology_component_sizes=component_sizes,
+            topology_component_mean_evidence=component_mean_evidence,
             selected_topology=selected_topology,
         )
         return geometry, diagnostics
@@ -451,41 +457,61 @@ class BoardDetector:
     def _select_primary_topology(
         self,
         topology: NDArray[np.bool_],
-    ) -> tuple[NDArray[np.int32], tuple[int, ...], NDArray[np.bool_]]:
-        """Separate independent logical board components and reject tiny replicas.
+        occupancy: NDArray[np.float32],
+    ) -> tuple[
+        NDArray[np.int32],
+        tuple[int, ...],
+        tuple[float, ...],
+        NDArray[np.bool_],
+    ]:
+        """Separate true board islands from a scaled opponent-board replica.
 
-        Competitive levels can show a miniature opponent board near the real
-        player board. Both share the same visual theme, so color segmentation
-        alone can merge them into one large bounding box. After pitch inference,
-        however, the miniature board projects into a sparse secondary component
-        on the player's logical grid.
+        Size alone is not sufficient: some real levels contain tiny detached
+        islands, even a single playable cell. The useful distinction is scale.
 
-        We label 4-connected topology components and keep the largest component
-        plus any other component whose size is comparable. This removes small
-        scaled replicas without assuming the real board must be the only island.
+        A genuine island is rendered at the same cell pitch as the main board,
+        so its corner-based board evidence is usually very strong. A miniature
+        opponent board is sampled on the player's much larger grid and therefore
+        tends to produce weaker, mixed evidence.
+
+        Keep a component when either:
+        - its size is comparable to the largest component; or
+        - its mean visual evidence is strong enough to look like same-scale
+          player-board cells.
+
+        This retains small legitimate islands without re-admitting the mini-board.
         """
         count, labels = cv2.connectedComponents(
             topology.astype(np.uint8),
             connectivity=4,
         )
         if count <= 1:
-            return labels.astype(np.int32), (), topology.copy()
+            return labels.astype(np.int32), (), (), topology.copy()
 
         sizes = tuple(
             int(np.count_nonzero(labels == label))
             for label in range(1, count)
         )
+        means = tuple(
+            float(occupancy[labels == label].mean())
+            if np.any(labels == label)
+            else 0.0
+            for label in range(1, count)
+        )
         if not sizes:
-            return labels.astype(np.int32), (), topology.copy()
+            return labels.astype(np.int32), (), (), topology.copy()
 
         largest = max(sizes)
         keep_labels = {
             label
-            for label, size in enumerate(sizes, start=1)
-            if size >= largest * self.config.secondary_component_keep_ratio
+            for label, (size, mean_evidence) in enumerate(zip(sizes, means), start=1)
+            if (
+                size >= largest * self.config.secondary_component_keep_ratio
+                or mean_evidence >= self.config.secondary_component_min_mean_evidence
+            )
         }
         selected = np.isin(labels, tuple(keep_labels))
-        return labels.astype(np.int32), sizes, selected.astype(np.bool_)
+        return labels.astype(np.int32), sizes, means, selected.astype(np.bool_)
 
     @staticmethod
     def _crop_to_selected_topology(
