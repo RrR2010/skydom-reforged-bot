@@ -61,6 +61,8 @@ def test_collector_saves_images_and_keeps_predictions_separate_from_labels(tmp_p
     assert len(records) == 2
     assert all(record.labels is None for record in records)
     assert records[0].suggested["color"]["value"] == "green"
+    assert len(records[0].capture_ids) == 1
+    assert records[0].capture_ids == records[1].capture_ids
 
     record_path = tmp_path / "records" / f"{records[0].sample_id}.json"
     payload = json.loads(record_path.read_text(encoding="utf-8"))
@@ -87,3 +89,24 @@ def test_collector_preserves_existing_human_labels_on_recollection(tmp_path) -> 
     second = collector.collect(image, geometry, estimates, source="second")[0]
 
     assert second.labels == payload["labels"]
+    assert second.capture_ids == first.capture_ids
+
+
+def test_collector_accumulates_capture_provenance_for_repeated_crop(tmp_path) -> None:
+    image, geometry, estimates = _fixture()
+    collector = DatasetCollector(tmp_path)
+    first = collector.collect(image, geometry, estimates, source="first")[0]
+
+    changed_board = image.copy()
+    changed_board[:, 40:] = (80, 20, 220)
+    second = collector.collect(
+        changed_board,
+        geometry,
+        estimates,
+        source="second",
+    )[0]
+
+    assert second.sample_id == first.sample_id
+    assert len(second.capture_ids) == 2
+    assert second.capture_ids[0] == first.capture_ids[0]
+    assert second.capture_ids[1] != first.capture_ids[0]
