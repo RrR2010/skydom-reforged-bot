@@ -10,7 +10,7 @@ from skydom_bot.dataset.label_studio import export_label_studio_storage
 def _write_record(records, images, sample_id: str = "abc123") -> None:
     payload = {
         "sample_id": sample_id,
-        "image": f"images/{sample_id}.png",
+        "image": f"input/images/{sample_id}.png",
         "row": 2,
         "col": 3,
         "source": "tile-debugger",
@@ -32,9 +32,9 @@ def _write_record(records, images, sample_id: str = "abc123") -> None:
 def test_export_creates_batch_input_images_and_target_dir(tmp_path) -> None:
     dataset = tmp_path / "dataset"
     records = dataset / "records"
-    images = dataset / "images"
+    images = dataset / "input" / "images"
     records.mkdir(parents=True)
-    images.mkdir()
+    images.mkdir(parents=True)
     _write_record(records, images)
 
     summary = export_label_studio_storage(dataset)
@@ -42,7 +42,7 @@ def test_export_creates_batch_input_images_and_target_dir(tmp_path) -> None:
     assert summary.total_samples == 1
     assert summary.new_samples == 1
     assert summary.existing_samples == 0
-    assert summary.copied_images == 1
+    assert summary.copied_images == 0
     assert summary.config_path.exists()
     assert summary.output_dir.exists()
     assert summary.batch_path is not None
@@ -64,9 +64,9 @@ def test_export_creates_batch_input_images_and_target_dir(tmp_path) -> None:
 def test_export_is_incremental_and_creates_new_batch_only_for_new_samples(tmp_path) -> None:
     dataset = tmp_path / "dataset"
     records = dataset / "records"
-    images = dataset / "images"
+    images = dataset / "input" / "images"
     records.mkdir(parents=True)
-    images.mkdir()
+    images.mkdir(parents=True)
     _write_record(records, images, "first")
 
     first = export_label_studio_storage(dataset)
@@ -90,9 +90,9 @@ def test_export_is_incremental_and_creates_new_batch_only_for_new_samples(tmp_pa
 def test_export_with_no_new_samples_does_not_create_empty_batch(tmp_path) -> None:
     dataset = tmp_path / "dataset"
     records = dataset / "records"
-    images = dataset / "images"
+    images = dataset / "input" / "images"
     records.mkdir(parents=True)
-    images.mkdir()
+    images.mkdir(parents=True)
     _write_record(records, images, "only")
 
     first = export_label_studio_storage(dataset)
@@ -102,3 +102,31 @@ def test_export_with_no_new_samples_does_not_create_empty_batch(tmp_path) -> Non
     assert second.batch_path is None
     assert second.new_samples == 0
     assert second.existing_samples == 1
+
+
+def test_export_migrates_legacy_crop_once_and_normalizes_record_path(tmp_path) -> None:
+    dataset = tmp_path / "dataset"
+    records = dataset / "records"
+    legacy_images = dataset / "images"
+    records.mkdir(parents=True)
+    legacy_images.mkdir()
+
+    payload = {
+        "sample_id": "legacy",
+        "image": "images/legacy.png",
+        "row": 1,
+        "col": 2,
+        "source": "legacy",
+        "suggested": {},
+        "labels": None,
+    }
+    record_path = records / "legacy.json"
+    record_path.write_text(json.dumps(payload), encoding="utf-8")
+    (legacy_images / "legacy.png").write_bytes(b"png")
+
+    summary = export_label_studio_storage(dataset)
+
+    assert summary.copied_images == 1
+    assert (dataset / "input" / "images" / "legacy.png").exists()
+    normalized = json.loads(record_path.read_text(encoding="utf-8"))
+    assert normalized["image"] == "input/images/legacy.png"
