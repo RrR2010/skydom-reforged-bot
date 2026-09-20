@@ -32,10 +32,7 @@ def test_elongated_shape_has_non_square_aspect_ratio() -> None:
     diagnostics = extract_shape_features(crop, mask)
 
     assert diagnostics.features.component_count == 1
-    assert (
-        diagnostics.features.aspect_ratio > 1.35
-        or diagnostics.features.aspect_ratio < 0.74
-    )
+    assert diagnostics.features.oriented_aspect_ratio > 2.0
 
 
 def test_fragmented_shape_counts_multiple_components() -> None:
@@ -46,3 +43,26 @@ def test_fragmented_shape_counts_multiple_components() -> None:
     diagnostics = extract_shape_features(crop, mask)
 
     assert diagnostics.features.component_count == 2
+
+
+def test_tiny_threshold_holes_are_ignored() -> None:
+    crop, mask = _blank()
+    cv2.rectangle(mask, (15, 15), (65, 65), 255, -1)
+    mask[25, 25] = 0
+    mask[35, 35] = 0
+    mask[45, 45] = 0
+
+    diagnostics = extract_shape_features(crop, mask)
+
+    assert diagnostics.features.hole_count == 0
+
+
+def test_rotated_shape_keeps_elongation_in_oriented_box() -> None:
+    crop, mask = _blank()
+    box = cv2.boxPoints(((40.0, 40.0), (54.0, 18.0), 45.0)).astype(np.int32)
+    cv2.fillConvexPoly(mask, box, 255)
+
+    diagnostics = extract_shape_features(crop, mask)
+
+    assert 0.8 < diagnostics.features.aspect_ratio < 1.2
+    assert diagnostics.features.oriented_aspect_ratio > 2.5
