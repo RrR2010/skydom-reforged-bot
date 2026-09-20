@@ -105,6 +105,25 @@ skydom-debug-vision --screen --monitor 1 --save-steps .\artifacts\vision-steps -
 
 The **cell evidence** and **structural reconciliation** steps are particularly useful when a hint animation, blocker, or special tile weakens a real cell. The detector keeps ambiguous visual evidence instead of discarding it immediately, then conservatively promotes an uncertain interior cell only when the surrounding grid strongly supports its existence.
 
+## CLI command guide
+
+After installing the project, use:
+
+```powershell
+skydom --help
+```
+
+for a compact overview of the available commands and the normal workflow.
+Topic-specific help is also available:
+
+```powershell
+skydom help workflow
+skydom help collect
+skydom help label-studio
+```
+
+Every individual command continues to support its own `--help`.
+
 ## Tests
 
 ```powershell
