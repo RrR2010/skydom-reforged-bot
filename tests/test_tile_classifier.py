@@ -113,3 +113,20 @@ def test_shape_foreground_is_not_clipped_by_color_circle() -> None:
         diagnostics.foreground_mask
     )
     assert diagnostics.shape_foreground_mask[20, 58] > 0 or diagnostics.shape_foreground_mask[60, 22] > 0
+
+
+def test_different_color_overlay_is_separated_from_base_shape() -> None:
+    image = np.zeros((80, 80, 3), dtype=np.uint8)
+    image[:] = (35, 42, 108)
+    cell = Cell(0, 0, Point(40, 40), Rect(0, 0, 80, 80), 1.0)
+
+    purple = _rgb_from_hsv(150)
+    yellow = _rgb_from_hsv(28)
+    cv2.rectangle(image, (18, 18), (62, 62), purple, -1)
+    cv2.line(image, (10, 65), (70, 15), yellow, 8)
+
+    observation, diagnostics = TileClassifier().classify_cell(image, cell)
+
+    assert observation.color is TileColor.PURPLE
+    assert np.count_nonzero(diagnostics.shape_foreground_mask) > 0
+    assert np.count_nonzero(diagnostics.overlay_foreground_mask) > 0
