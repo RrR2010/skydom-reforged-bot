@@ -135,3 +135,38 @@ def test_structural_reconciliation_does_not_fill_irregular_edge_gap() -> None:
     assert int(state[1, 1]) == 1
     assert int(support[1, 1]) == 2
     assert not bool(topology[1, 1])
+
+
+def test_secondary_mini_board_is_rejected_and_primary_grid_is_normalized() -> None:
+    detector = BoardDetector()
+    topology = np.zeros((9, 14), dtype=np.bool_)
+
+    # Main 9x9 player board occupies columns 5..13 and is one large component.
+    topology[:, 5:14] = True
+
+    # Mini opponent preview projects sparsely on the player's larger grid scale.
+    topology[4:8, 0:2] = True
+    topology[8, 1:4] = True
+
+    labels, sizes, selected = detector._select_primary_topology(topology)
+
+    assert max(sizes) == 81
+    assert int(np.count_nonzero(selected)) == 81
+    assert not bool(selected[5, 0])
+    assert bool(selected[5, 5])
+
+    occupancy = selected.astype(np.float32)
+    bounds = Rect(260, 206, 915, 596)
+    final_bounds, final_occupancy, final_topology, pitch_x, pitch_y = detector._crop_to_selected_topology(
+        bounds,
+        occupancy,
+        selected,
+        915 / 14,
+        596 / 9,
+    )
+
+    assert final_topology.shape == (9, 9)
+    assert final_occupancy.shape == (9, 9)
+    assert final_bounds.x > bounds.x
+    assert abs(pitch_x - 65.36) < 0.2
+    assert abs(pitch_y - 66.22) < 0.2
