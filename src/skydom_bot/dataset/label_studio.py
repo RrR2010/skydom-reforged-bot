@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -162,12 +161,12 @@ def _next_batch_path(input_dir: Path) -> Path:
     return input_dir / f"batch-tasks-{next_number:04d}.json"
 
 
-def _copy_input_image(
+def _ensure_input_image(
     dataset_root: Path,
     images_dir: Path,
     record: dict[str, Any],
 ) -> bool:
-    """Ensure the Label Studio input tree contains the crop image."""
+    """Ensure an input image exists, migrating the legacy layout if necessary."""
     sample_id = record.get("sample_id")
     if not isinstance(sample_id, str):
         return False
@@ -176,19 +175,15 @@ def _copy_input_image(
     if destination.exists():
         return False
 
-    candidates: list[Path] = []
-    image = record.get("image")
-    if isinstance(image, str):
-        candidates.append(dataset_root / Path(image))
-    candidates.append(dataset_root / "images" / f"{sample_id}.png")
-
-    source = next((path for path in candidates if path.exists()), None)
-    if source is None:
+    # Compatibility for datasets collected before input/images became the
+    # canonical crop location. This is a one-time migration path.
+    legacy = dataset_root / "images" / f"{sample_id}.png"
+    if not legacy.exists():
         raise FileNotFoundError(
-            f"Could not locate crop image for sample {sample_id}: {candidates}"
+            f"Missing crop image for sample {sample_id}: expected {destination}"
         )
 
-    shutil.copy2(source, destination)
+    destination.write_bytes(legacy.read_bytes())
     return True
 
 
@@ -222,8 +217,16 @@ def export_label_studio_storage(
             continue
 
         total_samples += 1
-        if _copy_input_image(dataset_root, images_dir, record):
+        if _ensure_input_image(dataset_root, images_dir, record):
             copied_images += 1
+
+        expected_image = (Path("input") / "images" / f"{task['data']['sample_id']}.png").as_posix()
+        if record.get("image") != expected_image:
+            record["image"] = expected_image
+            record_path.write_text(
+                json.dumps(record, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
 
         sample_id = task["data"]["sample_id"]
         if sample_id not in exported_ids:
