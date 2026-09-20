@@ -36,6 +36,8 @@ class DatasetStatistics:
     labeled: int
     unlabeled: int
     invalid: int
+    with_capture_provenance: int
+    without_capture_provenance: int
     distributions: dict[str, dict[str, int]]
     issues: tuple[DatasetIssue, ...]
 
@@ -71,6 +73,7 @@ def collect_dataset_statistics(root: Path = Path("dataset")) -> DatasetStatistic
     counters = {field: Counter() for field in _LABEL_FIELDS}
     issues: list[DatasetIssue] = []
     total = labeled = unlabeled = invalid = 0
+    with_capture_provenance = without_capture_provenance = 0
 
     if not records_dir.exists():
         return DatasetStatistics(
@@ -78,6 +81,8 @@ def collect_dataset_statistics(root: Path = Path("dataset")) -> DatasetStatistic
             labeled=0,
             unlabeled=0,
             invalid=0,
+            with_capture_provenance=0,
+            without_capture_provenance=0,
             distributions={field: {} for field in _LABEL_FIELDS},
             issues=(),
         )
@@ -95,6 +100,15 @@ def collect_dataset_statistics(root: Path = Path("dataset")) -> DatasetStatistic
             invalid += 1
             issues.append(DatasetIssue(path, "record root must be an object"))
             continue
+
+        capture_ids = payload.get("capture_ids")
+        if (
+            isinstance(capture_ids, list)
+            and any(isinstance(item, str) and item for item in capture_ids)
+        ):
+            with_capture_provenance += 1
+        else:
+            without_capture_provenance += 1
 
         sample_id = payload.get("sample_id")
         if sample_id != path.stem:
@@ -133,6 +147,8 @@ def collect_dataset_statistics(root: Path = Path("dataset")) -> DatasetStatistic
         labeled=labeled,
         unlabeled=unlabeled,
         invalid=invalid,
+        with_capture_provenance=with_capture_provenance,
+        without_capture_provenance=without_capture_provenance,
         distributions=distributions,
         issues=tuple(issues),
     )
