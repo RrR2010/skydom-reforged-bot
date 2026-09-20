@@ -130,3 +130,20 @@ def test_different_color_overlay_is_separated_from_base_shape() -> None:
     assert observation.color is TileColor.PURPLE
     assert np.count_nonzero(diagnostics.shape_foreground_mask) > 0
     assert np.count_nonzero(diagnostics.overlay_foreground_mask) > 0
+
+
+def test_blocker_crossing_center_keeps_large_base_components() -> None:
+    image = np.zeros((80, 80, 3), dtype=np.uint8)
+    image[:] = (35, 42, 108)
+    cell = Cell(0, 0, Point(40, 40), Rect(0, 0, 80, 80), 1.0)
+
+    purple = _rgb_from_hsv(150)
+    yellow = _rgb_from_hsv(28)
+    cv2.rectangle(image, (15, 15), (65, 65), purple, -1)
+    cv2.line(image, (6, 70), (74, 10), yellow, 11)
+
+    observation, diagnostics = TileClassifier().classify_cell(image, cell)
+
+    assert observation.color is TileColor.PURPLE
+    assert np.count_nonzero(diagnostics.shape_foreground_mask) > 900
+    assert np.count_nonzero(diagnostics.overlay_foreground_mask) > 200
