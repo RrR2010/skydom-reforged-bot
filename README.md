@@ -205,3 +205,13 @@ compact base tile  -> high solidity / compact contour
 ```
 
 The goal is to inspect real game variants before turning these descriptors into hard semantic rules.
+
+
+### Separate masks for color and shape
+
+Color recognition and shape recognition now deliberately use different spatial masks.
+
+- **Color mask:** circular, centered, conservative. It samples the tile core and avoids borders, blockers, and neighboring cells.
+- **Shape mask:** nearly full-cell rectangular support, with only a small inset to avoid the purple grid/frame. It preserves silhouettes that extend beyond the center, such as carrots, chains, and large special pieces.
+
+This avoids clipping shape descriptors with a mask that was designed for an entirely different task.
