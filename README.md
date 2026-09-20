@@ -122,3 +122,36 @@ The detector is intentionally heuristic at this stage. Useful fixtures vary one 
 - the level-complete or level-failed screen.
 
 These cases drive changes instead of embedding assumptions from a single level.
+
+
+## M3: first-stage tile recognition
+
+The first tile recognizer deliberately classifies only the **color family** of each active cell. Shape and special-piece semantics come later.
+
+```powershell
+git pull
+pip install -e ".[dev,capture]"
+skydom-debug-tiles --screen --monitor 1
+```
+
+The command:
+
+- detects board geometry;
+- prints the same board summary/topology used by the geometry debugger;
+- classifies every active cell as `R/O/Y/G/B/P/?`;
+- prints unknown and low-confidence counts;
+- opens an interactive board where clicking a cell reveals its crop, extracted foreground, hue histogram, dominant hue, and per-color score.
+
+The current classifier uses a classical vision pipeline:
+
+```text
+cell crop
+  -> center spatial mask
+  -> HSV conversion
+  -> high-saturation / high-value foreground mask
+  -> hue histogram
+  -> color-family score
+  -> confidence / UNKNOWN fallback
+```
+
+This is intentionally simpler than a neural classifier. It makes segmentation and feature design directly observable and gives us a baseline before adding shape recognition or learned models.
