@@ -36,3 +36,20 @@ def test_detects_irregular_board_without_hard_coded_dimensions() -> None:
     assert geometry.has_cell(7, 5)
     assert abs(geometry.pitch_x - 60) < 1.5
     assert abs(geometry.pitch_y - 60) < 1.5
+
+
+def test_large_piece_does_not_make_a_real_cell_disappear() -> None:
+    image = _synthetic_board()
+    pitch = 60
+    x0, y0 = 280, 50
+    row, col = 3, 4
+    xa, ya = x0 + col * pitch, y0 + row * pitch
+
+    # Mimic a large square game piece: it covers almost all cell interior but
+    # leaves the board-colored corners visible.
+    cv2.rectangle(image, (xa + 6, ya + 6), (xa + pitch - 7, ya + pitch - 7), (245, 95, 5), -1)
+
+    geometry = BoardDetector().detect(image)
+
+    assert geometry.has_cell(row, col)
+    assert len(geometry.cells) == 54
