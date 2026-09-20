@@ -14,6 +14,13 @@ class TileKind(str, Enum):
     UNKNOWN = "unknown"
 
 
+class TilePowerup(str, Enum):
+    """Power-up/special modifier independent from base kind and blocker."""
+
+    NONE = "none"
+    UNKNOWN = "unknown"
+
+
 class TileBlocker(str, Enum):
     """Overlay/blocker state that changes how a tile can be used."""
 
@@ -32,5 +39,8 @@ class TileSemanticObservation:
     kind_confidence: float
     blocker: TileBlocker
     blocker_confidence: float
+    powerup: TilePowerup
+    powerup_confidence: float
     residual_fraction: float
+    neutral_overlay_fraction: float
     shape_anomaly: float
