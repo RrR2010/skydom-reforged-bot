@@ -68,10 +68,31 @@ def test_orange_gradient_is_not_rejected_as_ambiguous() -> None:
     orange = _rgb_from_hsv(16)
     red_orange = _rgb_from_hsv(5)
     cv2.circle(image, (40, 40), 25, orange, -1)
-    cv2.rectangle(image, (15, 40), (65, 65), red_orange, -1)
+    # Keep the red-orange band substantial but smaller than the orange body.
+    # The previous fixture started at y=40 and accidentally painted more than
+    # half of the circular tile red, contradicting the test's own premise.
+    cv2.rectangle(image, (15, 50), (65, 65), red_orange, -1)
 
     observation, diagnostics = TileClassifier().classify_cell(image, cell)
 
     assert diagnostics.class_scores[TileColor.ORANGE] > diagnostics.class_scores[TileColor.RED]
+    assert diagnostics.class_scores[TileColor.RED] > 0.15
     assert observation.color is TileColor.ORANGE
     assert observation.confidence >= 0.50
+
+
+def test_orange_plurality_confidence_matches_real_gradient_case() -> None:
+    classifier = TileClassifier()
+    scores = {
+        TileColor.RED: 0.43,
+        TileColor.ORANGE: 0.54,
+        TileColor.YELLOW: 0.02,
+        TileColor.GREEN: 0.00,
+        TileColor.BLUE: 0.01,
+        TileColor.PURPLE: 0.00,
+    }
+
+    color, confidence = classifier._select_color(scores, foreground_fraction=0.93)
+
+    assert color is TileColor.ORANGE
+    assert confidence == pytest.approx(0.54)
