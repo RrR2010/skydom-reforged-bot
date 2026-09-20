@@ -15,10 +15,12 @@ dependencies = [
 
 [project.optional-dependencies]
 capture = ["mss>=10.0"]
-dev = ["pytest>=8.3"]
+visual = ["matplotlib>=3.9"]
+dev = ["pytest>=8.3", "matplotlib>=3.9"]
 
 [project.scripts]
 skydom-inspect = "skydom_bot.cli:main"
+skydom-debug-vision = "skydom_bot.debug.vision_debugger:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/skydom_bot"]
