@@ -1,21 +1,16 @@
-"""Tests for Label Studio export format."""
+"""Tests for Label Studio storage export format."""
 
 from __future__ import annotations
 
 import json
 
-from skydom_bot.dataset.label_studio import export_label_studio
+from skydom_bot.dataset.label_studio import export_label_studio_storage
 
 
-def test_export_creates_local_file_task_and_bootstrap_predictions(tmp_path) -> None:
-    dataset = tmp_path / "dataset"
-    records = dataset / "records"
-    records.mkdir(parents=True)
-    (dataset / "images").mkdir()
-
+def _write_record(records, sample_id: str = "abc123") -> None:
     payload = {
-        "sample_id": "abc123",
-        "image": "images/abc123.png",
+        "sample_id": sample_id,
+        "image": f"images/{sample_id}.png",
         "row": 2,
         "col": 3,
         "source": "tile-debugger",
@@ -27,13 +22,29 @@ def test_export_creates_local_file_task_and_bootstrap_predictions(tmp_path) -> N
         },
         "labels": None,
     }
-    (records / "abc123.json").write_text(json.dumps(payload), encoding="utf-8")
+    (records / f"{sample_id}.json").write_text(
+        json.dumps(payload),
+        encoding="utf-8",
+    )
 
-    config_path, tasks_path, count = export_label_studio(dataset)
 
-    assert count == 1
-    assert config_path.exists()
-    task = json.loads(tasks_path.read_text(encoding="utf-8"))[0]
+def test_export_creates_per_sample_storage_task_and_target_dir(tmp_path) -> None:
+    dataset = tmp_path / "dataset"
+    records = dataset / "records"
+    records.mkdir(parents=True)
+    (dataset / "images").mkdir()
+    _write_record(records)
+
+    summary = export_label_studio_storage(dataset)
+
+    assert summary.total == 1
+    assert summary.created == 1
+    assert summary.existing == 0
+    assert summary.config_path.exists()
+    assert summary.target_dir.exists()
+
+    task_path = summary.source_tasks_dir / "abc123.json"
+    task = json.loads(task_path.read_text(encoding="utf-8"))
     assert task["data"]["image"] == "/data/local-files/?d=images/abc123.png"
     assert task["data"]["sample_id"] == "abc123"
     assert task["predictions"][0]["model_version"] == "classical-bootstrap"
@@ -41,3 +52,27 @@ def test_export_creates_local_file_task_and_bootstrap_predictions(tmp_path) -> N
     assert {item["from_name"] for item in results} == {
         "color", "kind", "blocker", "powerup"
     }
+
+
+def test_export_is_incremental_and_does_not_rewrite_existing_task(tmp_path) -> None:
+    dataset = tmp_path / "dataset"
+    records = dataset / "records"
+    records.mkdir(parents=True)
+    (dataset / "images").mkdir()
+    _write_record(records, "first")
+
+    first = export_label_studio_storage(dataset)
+    first_task = first.source_tasks_dir / "first.json"
+    original = first_task.read_text(encoding="utf-8")
+
+    # Simulate an already-published immutable source task.
+    first_task.write_text(original + "\n", encoding="utf-8")
+    _write_record(records, "second")
+
+    second = export_label_studio_storage(dataset)
+
+    assert second.total == 2
+    assert second.created == 1
+    assert second.existing == 1
+    assert first_task.read_text(encoding="utf-8") == original + "\n"
+    assert (second.source_tasks_dir / "second.json").exists()
