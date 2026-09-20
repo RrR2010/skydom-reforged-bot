@@ -430,28 +430,53 @@ The next dataset milestone is human annotation plus a train/validation split. On
 
 ### Label Studio integration
 
-The local crop dataset can now be exported into Label Studio's task format:
+The Label Studio integration is storage-first and incremental. The exporter no
+longer writes one monolithic `tasks.json` for repeated manual import.
+
+Run:
 
 ```powershell
 skydom-export-label-studio
 ```
 
-This writes:
+It creates:
 
 ```text
-dataset/label_studio/config.xml
-dataset/label_studio/tasks.json
+dataset/
+  images/
+    <sample-id>.png
+  records/
+    <sample-id>.json
+  label_studio/
+    config.xml
+    source/
+      tasks/
+        <sample-id>.json
+    target/
+      annotations/
 ```
 
-The generated tasks reference the existing crop images through Label Studio's local-file endpoint:
+Each source task file is immutable and named by the crop's content-derived
+`sample_id`. Re-running the exporter leaves existing task files untouched and
+creates files only for newly collected samples. This makes Label Studio source
+storage synchronization naturally incremental.
 
-```text
-/data/local-files/?d=images/<sample-id>.png
-```
+Each task includes:
 
-and import the current classical recognizer output as `predictions`, not annotations. This keeps bootstrap suggestions visually available while preserving human annotation as the source of truth.
+- the existing crop through `/data/local-files/?d=images/<sample-id>.png`;
+- `sample_id`;
+- row, column, and capture source metadata;
+- the classical recognizer output as Label Studio `predictions`, never as
+  human annotations.
 
-For a local Windows setup, start Label Studio from its separate environment with local file serving enabled and the dataset directory as the document root:
+The `target/annotations` directory is created in advance for Label Studio
+Target Storage, so submitted annotations can be persisted outside Label
+Studio's internal database.
+
+#### Local Label Studio startup
+
+Keep Label Studio in its separate Python 3.12 environment and expose the
+dataset directory as the local-files document root:
 
 ```powershell
 .\.venv-labelstudio\Scripts\Activate.ps1
@@ -460,9 +485,54 @@ $env:LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT=(Resolve-Path ".\dataset").Path
 label-studio
 ```
 
-Then create a project in Label Studio:
+#### Recommended Source Storage
 
-1. use the contents of `dataset/label_studio/config.xml` as the custom labeling interface;
-2. import `dataset/label_studio/tasks.json` as the project data.
+Configure one Local Files source storage with:
 
-The configuration exposes four independent single-choice dimensions: color, kind, blocker, and power-up.
+```text
+Absolute local path:
+<repo>\dataset
+
+Import Method:
+Tasks
+
+File filter:
+only JSON files under label_studio/source/tasks
+
+Scan all sub-folders:
+enabled
+```
+
+The exact filter syntax is Label Studio UI/version dependent; the important
+constraint is that only task-definition JSON files from
+`label_studio/source/tasks` are imported. Do not import `records/*.json` as
+tasks.
+
+This source storage also keeps the local image URLs resolvable because the
+storage root contains both `images/` and `label_studio/source/tasks/`.
+
+After collecting new boards:
+
+```powershell
+skydom-collect-tiles --screen --monitor 1
+skydom-export-label-studio
+```
+
+then synchronize the Label Studio source storage. Only newly created task files
+should become new Label Studio tasks.
+
+#### Recommended Target Storage
+
+Configure Local Files Target Storage with:
+
+```text
+<repo>\dataset\label_studio\target\annotations
+```
+
+This directory is reserved for submitted human annotations. The next pipeline
+step is to normalize those Label Studio results back into
+`dataset/records/*.json -> labels`, preserving `suggested` as the baseline
+prediction and human labels as ground truth.
+
+The labeling interface remains `dataset/label_studio/config.xml` and exposes
+four independent single-choice dimensions: color, kind, blocker, and power-up.
