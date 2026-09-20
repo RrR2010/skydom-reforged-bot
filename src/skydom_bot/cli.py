@@ -10,7 +10,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from skydom_bot.capture import capture_screen
-from skydom_bot.debug.overlay import draw_board_overlay
+from skydom_bot.debug.report import format_geometry_summary, save_board_overlay
 from skydom_bot.vision.board_detector import BoardDetector
 
 UInt8Image = NDArray[np.uint8]
@@ -40,18 +40,8 @@ def main() -> int:
     image = _read_rgb(args.image) if args.image else capture_screen(args.monitor)
     geometry = BoardDetector().detect(image)
 
-    print(f"Board: {geometry.rows}x{geometry.cols}")
-    print(f"Bounds: x={geometry.bounds.x}, y={geometry.bounds.y}, w={geometry.bounds.width}, h={geometry.bounds.height}")
-    print(f"Pitch: {geometry.pitch_x:.2f} x {geometry.pitch_y:.2f}")
-    print(f"Active cells: {len(geometry.cells)}")
-    print(f"Confidence: {geometry.confidence:.3f}")
-    print("Topology:")
-    print(geometry.topology_text())
-
-    overlay = draw_board_overlay(image, geometry)
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    cv2.imwrite(str(args.output), cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR))
-    print(f"Overlay: {args.output}")
+    print(format_geometry_summary(geometry))
+    print(f"Overlay: {save_board_overlay(image, geometry, args.output)}")
     return 0
 
 
