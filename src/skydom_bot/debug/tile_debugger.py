@@ -18,6 +18,7 @@ from skydom_bot.debug.report import format_geometry_summary, save_board_overlay
 from skydom_bot.domain.board import BoardGeometry, Cell
 from skydom_bot.domain.tile import TileColor, TileObservation
 from skydom_bot.vision.board_detector import BoardDetector
+from skydom_bot.vision.shape_features import ShapeDiagnostics, extract_shape_features
 from skydom_bot.vision.tile_classifier import TileClassifier, TileDiagnostics
 
 UInt8Image = NDArray[np.uint8]
@@ -80,7 +81,7 @@ class TileDebugger:
         self.figure: Figure = plt.figure(figsize=(15, 8))
         grid = self.figure.add_gridspec(
             2,
-            2,
+            3,
             left=0.04,
             right=0.98,
             top=0.91,
@@ -91,6 +92,7 @@ class TileDebugger:
         self.board_ax = self.figure.add_subplot(grid[:, 0])
         self.crop_ax = self.figure.add_subplot(grid[0, 1])
         self.feature_ax = self.figure.add_subplot(grid[1, 1])
+        self.shape_ax = self.figure.add_subplot(grid[:, 2])
 
         self.selected = self._initial_cell()
         self.figure.canvas.mpl_connect("button_press_event", self._on_click)
@@ -195,17 +197,41 @@ class TileDebugger:
             f"{score_text}"
         )
 
+    def _render_shape(self, diagnostics: ShapeDiagnostics) -> None:
+        self.shape_ax.clear()
+
+        top = diagnostics.contour_overlay
+        mask_rgb = np.repeat(diagnostics.contour_mask[:, :, None], 3, axis=2)
+        separator = np.full((top.shape[0], 4, 3), 255, dtype=np.uint8)
+        combined = np.concatenate((top, separator, mask_rgb), axis=1)
+        self.shape_ax.imshow(combined)
+        self.shape_ax.set_axis_off()
+
+        f = diagnostics.features
+        self.shape_ax.set_title(
+            "Shape descriptors — contour overlay | binary mask\n"
+            f"components={f.component_count}  holes={f.hole_count}\n"
+            f"area={f.area_fraction:.2f}  circularity={f.circularity:.2f}\n"
+            f"aspect={f.aspect_ratio:.2f}  extent={f.extent:.2f}\n"
+            f"solidity={f.solidity:.2f}  centroid_offset={f.centroid_offset:.3f}"
+        )
+
     def render(self) -> None:
         """Redraw all panels for the selected logical cell."""
         observation, diagnostics = self.classifier.classify_cell(
             self.image_rgb,
             self.selected,
         )
+        shape = extract_shape_features(
+            diagnostics.crop_rgb,
+            diagnostics.foreground_mask,
+        )
         self._render_board()
         self._render_crop(observation, diagnostics)
         self._render_features(diagnostics)
+        self._render_shape(shape)
         self.figure.suptitle(
-            "Skydom Tile Debugger — color classification before shape recognition",
+            "Skydom Tile Debugger — color + classical shape descriptors",
             fontsize=14,
         )
         self.figure.canvas.draw_idle()
