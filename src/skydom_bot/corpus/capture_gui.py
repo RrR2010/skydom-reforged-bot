@@ -78,9 +78,10 @@ def build_metadata(state: CaptureFormState) -> dict[str, str]:
         "board_variant": state.board_variant.strip(),
         "has_ice": "yes" if state.has_ice else "no",
     }
+    reserved = set(metadata)
     for key, value in state.custom:
         key = key.strip()
-        if key:
+        if key and key not in reserved:
             metadata[key] = value.strip()
     return metadata
 
