@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "skydom-reforged-bot"
+version = "0.1.0"
+description = "Computer-vision foundation for an autonomous Match-3 bot."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.0",
+    "opencv-python>=4.10",
+]
+
+[project.optional-dependencies]
+capture = ["mss>=10.0"]
+dev = ["pytest>=8.3"]
+
+[project.scripts]
+skydom-inspect = "skydom_bot.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/skydom_bot"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
