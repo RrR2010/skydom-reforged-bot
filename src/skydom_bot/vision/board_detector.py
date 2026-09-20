@@ -42,6 +42,8 @@ class BoardDetectorConfig:
     pitch_peak_ratio: float = 0.75
 
     occupancy_threshold: float = 0.50
+    occupancy_uncertain_threshold: float = 0.25
+    structural_required_cardinal_neighbors: int = 4
     cell_corner_ratio: float = 0.16
 
 
@@ -72,6 +74,9 @@ class BoardDetectionDiagnostics:
     pitch_x: PitchDiagnostics
     pitch_y: PitchDiagnostics
     occupancy: NDArray[np.float32]
+    evidence_state: NDArray[np.uint8]
+    cardinal_support: NDArray[np.uint8]
+    reconciled_topology: NDArray[np.bool_]
 
 
 class BoardDetectionError(RuntimeError):
@@ -120,7 +125,14 @@ class BoardDetector:
         ice_mask = self._ice_surface_mask(image_rgb)
         evidence_mask = cv2.bitwise_or(component_mask, ice_mask)
         occupancy = self._cell_occupancy_grid(evidence_mask, bounds, rows, cols, pitch_x, pitch_y)
-        cells = self._cells_from_occupancy(occupancy, bounds, pitch_x, pitch_y)
+        evidence_state, cardinal_support, reconciled_topology = self._reconcile_topology(occupancy)
+        cells = self._cells_from_topology(
+            occupancy,
+            reconciled_topology,
+            bounds,
+            pitch_x,
+            pitch_y,
+        )
         if not cells:
             raise BoardDetectionError("Board component found, but no active cells were inferred.")
 
@@ -145,6 +157,9 @@ class BoardDetector:
             pitch_x=pitch_x_diag,
             pitch_y=pitch_y_diag,
             occupancy=occupancy,
+            evidence_state=evidence_state,
+            cardinal_support=cardinal_support,
+            reconciled_topology=reconciled_topology,
         )
         return geometry, diagnostics
 
@@ -352,23 +367,73 @@ class BoardDetector:
 
         return occupancy
 
-    def _cells_from_occupancy(
+    def _reconcile_topology(
         self,
         occupancy: NDArray[np.float32],
+    ) -> tuple[NDArray[np.uint8], NDArray[np.uint8], NDArray[np.bool_]]:
+        """Reconcile ambiguous visual evidence with conservative grid structure.
+
+        Evidence is intentionally kept ternary before becoming topology:
+
+        - 2 = strong: visual evidence is already sufficient.
+        - 1 = uncertain: plausible cell, but below the strong threshold.
+        - 0 = absent: too little evidence to infer a cell.
+
+        An uncertain cell is promoted only when all configured cardinal
+        neighbors are strong. This is a deliberately conservative hysteresis
+        rule: it recovers a transiently occluded interior cell without filling
+        ordinary notches or edge gaps in an irregular board.
+        """
+        strong = occupancy >= self.config.occupancy_threshold
+        uncertain = (
+            (occupancy >= self.config.occupancy_uncertain_threshold)
+            & ~strong
+        )
+
+        state = np.zeros(occupancy.shape, dtype=np.uint8)
+        state[uncertain] = 1
+        state[strong] = 2
+
+        rows, cols = occupancy.shape
+        support = np.zeros(occupancy.shape, dtype=np.uint8)
+        for row in range(rows):
+            for col in range(cols):
+                neighbors = (
+                    (row - 1, col),
+                    (row + 1, col),
+                    (row, col - 1),
+                    (row, col + 1),
+                )
+                support[row, col] = sum(
+                    1
+                    for nr, nc in neighbors
+                    if 0 <= nr < rows and 0 <= nc < cols and strong[nr, nc]
+                )
+
+        promoted = uncertain & (
+            support >= self.config.structural_required_cardinal_neighbors
+        )
+        reconciled = strong | promoted
+        return state, support, reconciled
+
+    def _cells_from_topology(
+        self,
+        occupancy: NDArray[np.float32],
+        topology: NDArray[np.bool_],
         bounds: Rect,
         pitch_x: float,
         pitch_y: float,
     ) -> list[Cell]:
-        """Convert continuous cell evidence into the discrete board topology."""
+        """Convert reconciled topology into cell geometry."""
         cells: list[Cell] = []
         rows, cols = occupancy.shape
 
         for row in range(rows):
             for col in range(cols):
-                score = float(occupancy[row, col])
-                if score < self.config.occupancy_threshold:
+                if not bool(topology[row, col]):
                     continue
 
+                score = float(occupancy[row, col])
                 x0 = int(round(col * pitch_x))
                 x1 = int(round((col + 1) * pitch_x))
                 y0 = int(round(row * pitch_y))
