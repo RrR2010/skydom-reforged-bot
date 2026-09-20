@@ -11,6 +11,7 @@ from numpy.typing import NDArray
 from skydom_bot.domain.board import BoardGeometry, Cell, Point, Rect
 
 UInt8Image = NDArray[np.uint8]
+FloatImage = NDArray[np.float32]
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +45,35 @@ class BoardDetectorConfig:
     cell_corner_ratio: float = 0.16
 
 
+@dataclass(frozen=True, slots=True)
+class PitchDiagnostics:
+    """Intermediate 1D signals used to estimate one grid axis."""
+
+    axis: str
+    edge_energy: FloatImage
+    profile: NDArray[np.float32]
+    lags: NDArray[np.int32]
+    scores: NDArray[np.float64]
+    peaks: tuple[int, ...]
+    selected_pitch: float
+
+
+@dataclass(frozen=True, slots=True)
+class BoardDetectionDiagnostics:
+    """Intermediate images and arrays for visual inspection of detection."""
+
+    board_mask: UInt8Image
+    component_mask: UInt8Image
+    ice_mask: UInt8Image
+    evidence_mask: UInt8Image
+    bounds: Rect
+    crop_rgb: UInt8Image
+    crop_gray: FloatImage
+    pitch_x: PitchDiagnostics
+    pitch_y: PitchDiagnostics
+    occupancy: NDArray[np.float32]
+
+
 class BoardDetectionError(RuntimeError):
     """Raised when a board cannot be inferred with sufficient confidence."""
 
@@ -55,16 +85,19 @@ class BoardDetector:
         self.config = config or BoardDetectorConfig()
 
     def detect(self, image_rgb: UInt8Image) -> BoardGeometry:
-        """Detect board geometry from an RGB image.
+        """Detect board geometry from an RGB image."""
+        geometry, _ = self.detect_with_diagnostics(image_rgb)
+        return geometry
 
-        The detector separates two different questions:
-        1. Where is the board as a whole?
-        2. Which logical grid positions are playable cells?
+    def detect_with_diagnostics(
+        self,
+        image_rgb: UInt8Image,
+    ) -> tuple[BoardGeometry, BoardDetectionDiagnostics]:
+        """Detect geometry and preserve the intermediate perception pipeline.
 
-        The first question uses the stable dark-blue board background and can
-        group disconnected fragments caused by blockers such as ice. The second
-        uses multiple surface cues (normal board background + ice) at cell
-        corners, where game pieces usually occlude the least.
+        This method exists primarily for observability. The production detector
+        and the visual debugger execute the exact same operations, so a debug
+        plot cannot silently drift away from the real algorithm.
         """
         self._validate_image(image_rgb)
 
@@ -72,24 +105,27 @@ class BoardDetector:
         bounds, component_mask = self._board_component(board_mask)
 
         crop = image_rgb[bounds.y : bounds.bottom, bounds.x : bounds.right]
-        pitch_x = self._estimate_pitch(crop, axis=1)
-        pitch_y = self._estimate_pitch(crop, axis=0)
+        crop_gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY).astype(np.float32)
+        pitch_x_diag = self._pitch_diagnostics(crop, axis=1)
+        pitch_y_diag = self._pitch_diagnostics(crop, axis=0)
 
         # Both axes describe the same square-cell grid. Combining them prevents
         # one partially occluded axis from dominating the result.
-        pitch = float(np.median([pitch_x, pitch_y]))
+        pitch = float(np.median([pitch_x_diag.selected_pitch, pitch_y_diag.selected_pitch]))
         cols = max(1, int(round(bounds.width / pitch)))
         rows = max(1, int(round(bounds.height / pitch)))
         pitch_x = bounds.width / cols
         pitch_y = bounds.height / rows
 
-        evidence_mask = cv2.bitwise_or(component_mask, self._ice_surface_mask(image_rgb))
-        cells = self._extract_cells(evidence_mask, bounds, rows, cols, pitch_x, pitch_y)
+        ice_mask = self._ice_surface_mask(image_rgb)
+        evidence_mask = cv2.bitwise_or(component_mask, ice_mask)
+        occupancy = self._cell_occupancy_grid(evidence_mask, bounds, rows, cols, pitch_x, pitch_y)
+        cells = self._cells_from_occupancy(occupancy, bounds, pitch_x, pitch_y)
         if not cells:
             raise BoardDetectionError("Board component found, but no active cells were inferred.")
 
         confidence = self._confidence(bounds, pitch_x, pitch_y, cells)
-        return BoardGeometry(
+        geometry = BoardGeometry(
             bounds=bounds,
             rows=rows,
             cols=cols,
@@ -98,6 +134,19 @@ class BoardDetector:
             cells=tuple(cells),
             confidence=confidence,
         )
+        diagnostics = BoardDetectionDiagnostics(
+            board_mask=board_mask,
+            component_mask=component_mask,
+            ice_mask=ice_mask,
+            evidence_mask=evidence_mask,
+            bounds=bounds,
+            crop_rgb=crop,
+            crop_gray=crop_gray,
+            pitch_x=pitch_x_diag,
+            pitch_y=pitch_y_diag,
+            occupancy=occupancy,
+        )
+        return geometry, diagnostics
 
     @staticmethod
     def _validate_image(image_rgb: UInt8Image) -> None:
@@ -123,14 +172,7 @@ class BoardDetector:
         )
 
     def _board_component(self, mask: UInt8Image) -> tuple[Rect, UInt8Image]:
-        """Group nearby board-colored fragments without painting over occlusion.
-
-        Ice can split one physical board into several disconnected blue
-        components. We therefore cluster large fragments that overlap strongly
-        on one axis and are close on the other. Unlike morphological closing,
-        the returned mask still contains only pixels observed in the original
-        image.
-        """
+        """Group nearby board-colored fragments without painting over occlusion."""
         count, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
         if count <= 1:
             raise BoardDetectionError("No board-colored connected component was found.")
@@ -220,18 +262,11 @@ class BoardDetector:
         component = np.isin(labels, selected_labels).astype(np.uint8) * 255
         return bounds, component
 
-    def _estimate_pitch(self, crop_rgb: UInt8Image, axis: int) -> float:
-        """Estimate cell spacing from autocorrelation of image-edge energy.
-
-        OpenCV provides the image operations (grayscale conversion and the
-        surrounding image representation), but the autocorrelation itself is
-        implemented here with NumPy. We seek the smallest strong local peak so
-        a 2-cell harmonic (for example 130 px) does not beat the 1-cell period
-        (65 px).
-        """
+    def _pitch_diagnostics(self, crop_rgb: UInt8Image, axis: int) -> PitchDiagnostics:
+        """Build the edge profile and normalized autocorrelation for one axis."""
         gray = cv2.cvtColor(crop_rgb, cv2.COLOR_RGB2GRAY).astype(np.float32)
         derivative = np.abs(np.diff(gray, axis=axis))
-        profile = derivative.mean(axis=1 - axis)
+        profile = derivative.mean(axis=1 - axis).astype(np.float32)
         profile -= profile.mean()
 
         maximum = min(self.config.pitch_max_px, max(self.config.pitch_min_px + 1, len(profile) // 3))
@@ -239,7 +274,7 @@ class BoardDetector:
         if maximum <= minimum:
             raise BoardDetectionError("Board component is too small to estimate a cell pitch.")
 
-        scores = np.full(maximum + 1, -np.inf, dtype=np.float64)
+        scores = np.full(maximum + 1, np.nan, dtype=np.float64)
         for lag in range(minimum, maximum + 1):
             left = profile[:-lag]
             right = profile[lag:]
@@ -252,7 +287,7 @@ class BoardDetector:
             raise BoardDetectionError("Could not calculate grid autocorrelation.")
 
         peak_floor = float(finite.max()) * self.config.pitch_peak_ratio
-        peaks = [
+        peaks = tuple(
             lag
             for lag in range(minimum + 1, maximum)
             if (
@@ -261,11 +296,24 @@ class BoardDetector:
                 and scores[lag] >= scores[lag - 1]
                 and scores[lag] >= scores[lag + 1]
             )
-        ]
-        pitch = min(peaks) if peaks else int(np.argmax(scores))
+        )
+        pitch = min(peaks) if peaks else int(np.nanargmax(scores))
         if not np.isfinite(scores[pitch]) or scores[pitch] <= 0:
             raise BoardDetectionError("Could not find a periodic grid signal in the board image.")
-        return float(pitch)
+
+        return PitchDiagnostics(
+            axis="x" if axis == 1 else "y",
+            edge_energy=derivative,
+            profile=profile,
+            lags=np.arange(len(scores), dtype=np.int32),
+            scores=scores,
+            peaks=peaks,
+            selected_pitch=float(pitch),
+        )
+
+    def _estimate_pitch(self, crop_rgb: UInt8Image, axis: int) -> float:
+        """Estimate the cell spacing for one axis."""
+        return self._pitch_diagnostics(crop_rgb, axis).selected_pitch
 
     def _corner_occupancy(self, cell_mask: UInt8Image) -> float:
         """Measure board-surface evidence where game pieces rarely occlude it."""
@@ -281,7 +329,7 @@ class BoardDetector:
         pixels = sum(patch.size for patch in patches)
         return float(sum(np.count_nonzero(patch) for patch in patches) / pixels) if pixels else 0.0
 
-    def _extract_cells(
+    def _cell_occupancy_grid(
         self,
         evidence_mask: UInt8Image,
         bounds: Rect,
@@ -289,9 +337,10 @@ class BoardDetector:
         cols: int,
         pitch_x: float,
         pitch_y: float,
-    ) -> list[Cell]:
+    ) -> NDArray[np.float32]:
+        """Return per-cell board-surface evidence before thresholding."""
         local = evidence_mask[bounds.y : bounds.bottom, bounds.x : bounds.right]
-        cells: list[Cell] = []
+        occupancy = np.zeros((rows, cols), dtype=np.float32)
 
         for row in range(rows):
             for col in range(cols):
@@ -299,11 +348,31 @@ class BoardDetector:
                 x1 = int(round((col + 1) * pitch_x))
                 y0 = int(round(row * pitch_y))
                 y1 = int(round((row + 1) * pitch_y))
-                region = local[y0:y1, x0:x1]
-                occupancy = self._corner_occupancy(region)
-                if occupancy < self.config.occupancy_threshold:
+                occupancy[row, col] = self._corner_occupancy(local[y0:y1, x0:x1])
+
+        return occupancy
+
+    def _cells_from_occupancy(
+        self,
+        occupancy: NDArray[np.float32],
+        bounds: Rect,
+        pitch_x: float,
+        pitch_y: float,
+    ) -> list[Cell]:
+        """Convert continuous cell evidence into the discrete board topology."""
+        cells: list[Cell] = []
+        rows, cols = occupancy.shape
+
+        for row in range(rows):
+            for col in range(cols):
+                score = float(occupancy[row, col])
+                if score < self.config.occupancy_threshold:
                     continue
 
+                x0 = int(round(col * pitch_x))
+                x1 = int(round((col + 1) * pitch_x))
+                y0 = int(round(row * pitch_y))
+                y1 = int(round((row + 1) * pitch_y))
                 gx0, gy0 = bounds.x + x0, bounds.y + y0
                 width, height = x1 - x0, y1 - y0
                 cells.append(
@@ -312,7 +381,7 @@ class BoardDetector:
                         col=col,
                         center=Point(gx0 + width // 2, gy0 + height // 2),
                         bounds=Rect(gx0, gy0, width, height),
-                        occupancy=occupancy,
+                        occupancy=score,
                     )
                 )
 
