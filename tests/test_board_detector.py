@@ -156,10 +156,14 @@ def test_secondary_mini_board_is_rejected_and_primary_grid_is_normalized() -> No
     occupancy[4:8, 0:2] = 0.45
     occupancy[8, 1:4] = 0.45
 
-    labels, sizes, means, selected = detector._select_primary_topology(topology, occupancy)
+    labels, sizes, means, strong_fractions, selected = detector._select_primary_topology(
+        topology,
+        occupancy,
+    )
 
     assert max(sizes) == 81
     assert max(means) >= 0.99
+    assert max(strong_fractions) >= 0.99
     assert int(np.count_nonzero(selected)) == 81
     assert not bool(selected[5, 0])
     assert bool(selected[5, 5])
@@ -226,10 +230,14 @@ def test_small_high_evidence_island_is_preserved() -> None:
     occupancy = np.zeros((7, 9), dtype=np.float32)
     occupancy[topology] = 0.96
 
-    labels, sizes, means, selected = detector._select_primary_topology(topology, occupancy)
+    labels, sizes, means, strong_fractions, selected = detector._select_primary_topology(
+        topology,
+        occupancy,
+    )
 
     assert sorted(sizes) == [1, 15]
     assert min(means) > 0.90
+    assert min(strong_fractions) == 1.0
     assert bool(selected[0, 4])
 
 
@@ -275,3 +283,29 @@ def test_assisted_reconciliation_does_not_fill_gap_without_tile_evidence() -> No
 
     assert int(support[1, 1]) >= 2
     assert not bool(topology[1, 1])
+
+
+def test_small_island_with_one_weak_blocked_cell_is_preserved() -> None:
+    detector = BoardDetector()
+    topology = np.zeros((7, 9), dtype=np.bool_)
+    topology[2:7, 3:6] = True
+    topology[4:7, 0:2] = True
+
+    occupancy = np.zeros((7, 9), dtype=np.float32)
+    occupancy[topology] = 0.93
+
+    # Recreate the observed failure: a legitimate 5-cell island has one weak
+    # blocker-covered cell, pulling its mean below the old 0.80 cutoff while
+    # four of five cells remain individually strong.
+    occupancy[4, 0] = 0.28
+
+    labels, sizes, means, strong_fractions, selected = detector._select_primary_topology(
+        topology,
+        occupancy,
+    )
+
+    small_label = 1 + sizes.index(6)
+    assert means[small_label - 1] < 0.80
+    assert strong_fractions[small_label - 1] >= 0.60
+    assert bool(selected[4, 0])
+    assert bool(selected[6, 1])
