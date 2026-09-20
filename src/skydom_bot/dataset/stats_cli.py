@@ -1,1 +1,53 @@
-"""CLI for dataset statistics and integrity validation."""\n\nfrom __future__ import annotations\n\nimport argparse\nfrom pathlib import Path\n\nfrom skydom_bot.dataset.stats import collect_dataset_statistics\n\n\ndef build_parser() -> argparse.ArgumentParser:\n    """Build dataset statistics arguments."""\n    parser = argparse.ArgumentParser(\n        description="Summarize human labels and validate canonical dataset records."\n    )\n    parser.add_argument("--dataset", type=Path, default=Path("dataset"))\n    parser.add_argument(\n        "--strict",\n        action="store_true",\n        help="Return a non-zero exit code when validation issues are found.",\n    )\n    return parser\n\n\ndef main() -> int:\n    """Print dataset coverage, class distributions, and integrity issues."""\n    args = build_parser().parse_args()\n    stats = collect_dataset_statistics(args.dataset)\n\n    print(f"Dataset: {args.dataset}")\n    print(f"Records: {stats.total}")\n    print(f"Labeled: {stats.labeled}")\n    print(f"Unlabeled: {stats.unlabeled}")\n    print(f"Invalid labels/records: {stats.invalid}")\n\n    for field, counts in stats.distributions.items():\n        rendered = ", ".join(f"{name}={count}" for name, count in counts.items())\n        print(f"{field}: {rendered or '-'}")\n\n    if stats.issues:\n        print("Validation issues:")\n        for issue in stats.issues:\n            try:\n                display_path = issue.path.relative_to(args.dataset)\n            except ValueError:\n                display_path = issue.path\n            print(f"  {display_path}: {issue.message}")\n\n    return 1 if args.strict and stats.issues else 0\n\n\nif __name__ == "__main__":\n    raise SystemExit(main())\n
+"""CLI for dataset statistics and integrity validation."""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+from skydom_bot.dataset.stats import collect_dataset_statistics
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build dataset statistics arguments."""
+    parser = argparse.ArgumentParser(
+        description="Summarize human labels and validate canonical dataset records."
+    )
+    parser.add_argument("--dataset", type=Path, default=Path("dataset"))
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Return a non-zero exit code when validation issues are found.",
+    )
+    return parser
+
+
+def main() -> int:
+    """Print dataset coverage, class distributions, and integrity issues."""
+    args = build_parser().parse_args()
+    stats = collect_dataset_statistics(args.dataset)
+
+    print(f"Dataset: {args.dataset}")
+    print(f"Records: {stats.total}")
+    print(f"Labeled: {stats.labeled}")
+    print(f"Unlabeled: {stats.unlabeled}")
+    print(f"Invalid labels/records: {stats.invalid}")
+
+    for field, counts in stats.distributions.items():
+        rendered = ", ".join(f"{name}={count}" for name, count in counts.items())
+        print(f"{field}: {rendered or '-'}")
+
+    if stats.issues:
+        print("Validation issues:")
+        for issue in stats.issues:
+            try:
+                display_path = issue.path.relative_to(args.dataset)
+            except ValueError:
+                display_path = issue.path
+            print(f"  {display_path}: {issue.message}")
+
+    return 1 if args.strict and stats.issues else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
