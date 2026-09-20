@@ -27,7 +27,8 @@ def _missing(values: list[str], observed: set[str]) -> str:
 
 def _priority(count: int, target: int, coverage: int, coverage_total: int) -> str:
     """Return a collection priority from quantity and diversity coverage."""
-    if count == 0:
+    high_threshold = max(2, (target + 3) // 4)
+    if count < high_threshold:
         return "HIGH"
     if count < target or coverage < coverage_total:
         return "MEDIUM"
@@ -87,7 +88,7 @@ def build_collection_report(
         if powerup in _COLORLESS_POWERUPS:
             coverage_text = "n/a"
             missing_text = "not assessed"
-            priority = "HIGH" if count < target_per_class else "LOW"
+            priority = _priority(count, target_per_class, 0, 0)
         else:
             observed = set(powerup_color.get(powerup, {})) & color_set
             coverage_text = f"{len(observed)}/{len(colors)}"
