@@ -3,9 +3,9 @@
 ## Immediate validation
 
 - [ ] Pull latest branch and run full `pytest` after Label Studio importer changes.
-- [ ] Submit several annotations in Label Studio and confirm JSON files appear in `dataset/output/annotations`.
-- [ ] Run `skydom-import-label-studio` against real Target Storage output.
-- [ ] Verify imported `labels` match the UI selections and `suggested` remains unchanged.
+- [x] Submit several annotations in Label Studio and confirm Target Storage files appear in `dataset/output/annotations`.
+- [x] Run `skydom-import-label-studio` against real Target Storage output.
+- [x] Verify imported `labels` match the UI selections and `suggested` remains unchanged.
 - [ ] Check behavior when an annotation is edited after first submission.
 - [ ] Check whether Label Studio target files contain multiple annotations or only the latest annotation in this local-storage configuration.
 
@@ -14,8 +14,8 @@
 - [ ] Annotate representative normal pieces of every color.
 - [ ] Annotate carrots in multiple colors/orientations.
 - [ ] Annotate chained pieces, especially same-color chain cases.
-- [ ] Identify and name real power-up types as they appear.
-- [ ] Add new `TilePowerup` enum values only after examples are understood.
+- [x] Identify initial real power-up types: flyer, row, column, bomb, color-remover.
+- [x] Add observed `TilePowerup` enum values and synchronize Label Studio config.
 - [ ] Capture animation/highlight/hint states and decide whether they are excluded, separately labeled, or temporally filtered.
 - [ ] Add dataset statistics command: counts by color/kind/blocker/powerup and unlabeled count.
 - [ ] Add train/validation split keyed by capture/board rather than random crop only, to reduce leakage.
