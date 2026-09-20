@@ -55,3 +55,23 @@ def test_returns_unknown_when_cell_has_too_little_foreground() -> None:
     observation, _ = TileClassifier().classify_cell(image, cell)
 
     assert observation.color is TileColor.UNKNOWN
+
+
+def test_orange_gradient_is_not_rejected_as_ambiguous() -> None:
+    image = np.zeros((80, 80, 3), dtype=np.uint8)
+    image[:] = (35, 42, 108)
+    cell = Cell(0, 0, Point(40, 40), Rect(0, 0, 80, 80), 1.0)
+
+    # Recreate the game's orange gradient: a red-orange lower region and a
+    # brighter orange upper region. Orange remains the plurality, but red is a
+    # substantial runner-up.
+    orange = _rgb_from_hsv(16)
+    red_orange = _rgb_from_hsv(5)
+    cv2.circle(image, (40, 40), 25, orange, -1)
+    cv2.rectangle(image, (15, 40), (65, 65), red_orange, -1)
+
+    observation, diagnostics = TileClassifier().classify_cell(image, cell)
+
+    assert diagnostics.class_scores[TileColor.ORANGE] > diagnostics.class_scores[TileColor.RED]
+    assert observation.color is TileColor.ORANGE
+    assert observation.confidence >= 0.50
