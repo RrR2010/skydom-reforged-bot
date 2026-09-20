@@ -108,7 +108,10 @@ def _task_from_record(record: dict[str, Any]) -> dict[str, Any] | None:
 
     task: dict[str, Any] = {
         "data": {
-            "image": f"/data/local-files/?d={image}",
+            # LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT is the repository root,
+            # while the Local Files storage itself points to the dataset
+            # subdirectory. Therefore media URLs are repository-root-relative.
+            "image": f"/data/local-files/?d=dataset/{image}",
             "sample_id": sample_id,
         },
         "meta": {
