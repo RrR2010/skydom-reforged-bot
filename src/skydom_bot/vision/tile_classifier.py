@@ -23,6 +23,9 @@ class TileClassifierConfig:
     value_min: int = 125
     min_foreground_fraction: float = 0.08
     shape_inset_ratio: float = 0.04
+    shape_component_min_largest_ratio: float = 0.12
+    shape_component_min_area_ratio: float = 0.015
+    shape_bridge_ratio: float = 0.14
     histogram_bins: int = 180
     min_class_confidence: float = 0.50
 
@@ -170,25 +173,63 @@ class TileClassifier:
         candidate = cv2.morphologyEx(candidate, cv2.MORPH_CLOSE, kernel)
         candidate = cv2.morphologyEx(candidate, cv2.MORPH_OPEN, kernel)
 
-        count, labels, stats, centroids = cv2.connectedComponentsWithStats(
+        count, labels, stats, _ = cv2.connectedComponentsWithStats(
             np.where(candidate > 0, 1, 0).astype(np.uint8),
             connectivity=8,
         )
         shape = np.zeros_like(candidate)
         if count > 1:
-            cx, cy = width / 2.0, height / 2.0
-            choices: list[tuple[float, int, int]] = []
+            areas = [
+                int(stats[label, cv2.CC_STAT_AREA])
+                for label in range(1, count)
+            ]
+            largest = max(areas, default=0)
+            min_area = max(
+                int(round(width * height * self.config.shape_component_min_area_ratio)),
+                int(round(largest * self.config.shape_component_min_largest_ratio)),
+            )
+
+            # A blocker can cut the base tile exactly through its center. Using
+            # only the component nearest the center therefore selected a tiny
+            # remnant on chained pieces. Retain every substantial same-color
+            # component, then bridge narrow blocker gaps morphologically.
             for label in range(1, count):
-                area = int(stats[label, cv2.CC_STAT_AREA])
-                if area <= 0:
-                    continue
-                lx, ly = centroids[label]
-                distance = float(np.hypot(lx - cx, ly - cy))
-                # Prefer components near the known tile center; area breaks ties.
-                choices.append((distance, -area, label))
-            if choices:
-                _, _, selected = min(choices)
-                shape[labels == selected] = 255
+                if int(stats[label, cv2.CC_STAT_AREA]) >= min_area:
+                    shape[labels == label] = 255
+
+            bridge = max(
+                3,
+                int(round(min(width, height) * self.config.shape_bridge_ratio)),
+            )
+            if bridge % 2 == 0:
+                bridge += 1
+            bridge_kernel = cv2.getStructuringElement(
+                cv2.MORPH_ELLIPSE,
+                (bridge, bridge),
+            )
+            shape = cv2.morphologyEx(shape, cv2.MORPH_CLOSE, bridge_kernel)
+
+            # After bridging, keep the largest reconstructed base component.
+            reconstructed_count, reconstructed_labels, reconstructed_stats, _ = (
+                cv2.connectedComponentsWithStats(
+                    np.where(shape > 0, 1, 0).astype(np.uint8),
+                    connectivity=8,
+                )
+            )
+            if reconstructed_count > 1:
+                selected = 1 + int(
+                    np.argmax(
+                        reconstructed_stats[
+                            1:reconstructed_count,
+                            cv2.CC_STAT_AREA,
+                        ]
+                    )
+                )
+                shape = np.where(
+                    reconstructed_labels == selected,
+                    255,
+                    0,
+                ).astype(np.uint8)
 
         overlay = cv2.bitwise_and(full_foreground, cv2.bitwise_not(shape))
         return shape, overlay
