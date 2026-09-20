@@ -23,21 +23,11 @@ class LabelStudioImportSummary:
     invalid_files: int
 
 
-def _latest_annotation(task: dict[str, Any]) -> dict[str, Any] | None:
-    annotations = task.get("annotations")
-    if not isinstance(annotations, list):
-        return None
-
-    valid = [item for item in annotations if isinstance(item, dict)]
-    if not valid:
-        return None
-
-    def sort_key(item: dict[str, Any]) -> str:
-        updated = item.get("updated_at")
-        created = item.get("created_at")
-        return str(updated or created or "")
-
-    return max(valid, key=sort_key)
+def _annotation_sort_key(annotation: dict[str, Any]) -> str:
+    """Return a sortable timestamp for selecting the latest annotation."""
+    updated = annotation.get("updated_at")
+    created = annotation.get("created_at")
+    return str(updated or created or "")
 
 
 def _labels_from_annotation(annotation: dict[str, Any]) -> dict[str, str] | None:
@@ -67,7 +57,7 @@ def _labels_from_annotation(annotation: dict[str, Any]) -> dict[str, str] | None
     return labels
 
 
-def _sample_id(task: dict[str, Any]) -> str | None:
+def _sample_id_from_task(task: dict[str, Any]) -> str | None:
     data = task.get("data")
     if not isinstance(data, dict):
         return None
@@ -75,11 +65,44 @@ def _sample_id(task: dict[str, Any]) -> str | None:
     return sample_id if isinstance(sample_id, str) and sample_id else None
 
 
+def _annotation_candidates(payload: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    """Normalize supported Label Studio export shapes.
+
+    Local Files Target Storage writes one extensionless JSON file per
+    annotation, with `result` at the root and the source task nested under
+    `task`. Manual/task exports instead commonly place `data` at the root and
+    annotations under `annotations`. Support both shapes.
+    """
+    candidates: list[tuple[str, dict[str, Any]]] = []
+
+    # Local Files Target Storage format: annotation at root, task nested.
+    nested_task = payload.get("task")
+    if isinstance(nested_task, dict) and isinstance(payload.get("result"), list):
+        sample_id = _sample_id_from_task(nested_task)
+        if sample_id is not None:
+            candidates.append((sample_id, payload))
+        return candidates
+
+    # Task export format: task at root, annotations nested.
+    sample_id = _sample_id_from_task(payload)
+    annotations = payload.get("annotations")
+    if sample_id is not None and isinstance(annotations, list):
+        for annotation in annotations:
+            if isinstance(annotation, dict):
+                candidates.append((sample_id, annotation))
+
+    return candidates
+
+
 def import_label_studio_annotations(
     dataset_root: Path,
     annotations_dir: Path | None = None,
 ) -> LabelStudioImportSummary:
-    """Merge submitted Label Studio choices into dataset record labels."""
+    """Merge submitted Label Studio choices into dataset record labels.
+
+    Both extensionless Local Files Target Storage objects and conventional
+    `.json` task exports are supported.
+    """
     dataset_root = dataset_root.resolve()
     annotations_dir = (
         annotations_dir or dataset_root / "output" / "annotations"
@@ -93,26 +116,39 @@ def import_label_studio_annotations(
     skipped_missing_record = 0
     invalid_files = 0
 
-    for path in sorted(annotations_dir.glob("*.json")):
+    latest_by_sample: dict[str, dict[str, Any]] = {}
+
+    if annotations_dir.exists():
+        paths = sorted(path for path in annotations_dir.iterdir() if path.is_file())
+    else:
+        paths = []
+
+    for path in paths:
         files_seen += 1
         try:
-            task = json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError):
             invalid_files += 1
             continue
 
-        if not isinstance(task, dict):
+        if not isinstance(payload, dict):
             invalid_files += 1
             continue
 
-        sample_id = _sample_id(task)
-        if sample_id is None:
+        candidates = _annotation_candidates(payload)
+        if not candidates:
             invalid_files += 1
             continue
+
+        # Count source objects that successfully resolve to a dataset sample.
         tasks_with_sample_id += 1
+        for sample_id, annotation in candidates:
+            current = latest_by_sample.get(sample_id)
+            if current is None or _annotation_sort_key(annotation) >= _annotation_sort_key(current):
+                latest_by_sample[sample_id] = annotation
 
-        annotation = _latest_annotation(task)
-        labels = _labels_from_annotation(annotation) if annotation else None
+    for sample_id, annotation in latest_by_sample.items():
+        labels = _labels_from_annotation(annotation)
         if labels is None:
             skipped_without_annotation += 1
             continue
@@ -124,7 +160,7 @@ def import_label_studio_annotations(
 
         try:
             record = json.loads(record_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError):
             invalid_files += 1
             continue
         if not isinstance(record, dict):
