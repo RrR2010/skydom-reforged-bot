@@ -145,5 +145,7 @@ def test_blocker_crossing_center_keeps_large_base_components() -> None:
     observation, diagnostics = TileClassifier().classify_cell(image, cell)
 
     assert observation.color is TileColor.PURPLE
-    assert np.count_nonzero(diagnostics.shape_foreground_mask) > 900
+    # The reconstructed mask should contain both sides of the tile, not just
+    # one ~878 px half split by the synthetic blocker.
+    assert np.count_nonzero(diagnostics.shape_foreground_mask) > 1800
     assert np.count_nonzero(diagnostics.overlay_foreground_mask) > 200
