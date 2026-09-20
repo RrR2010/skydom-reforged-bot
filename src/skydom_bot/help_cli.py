@@ -38,6 +38,15 @@ _TOPICS: dict[str, str] = {
         The configured region excludes browser chrome and is reused on later captures.
         Images and metadata stay under corpus/ and are ignored by Git.
     """),
+    "capture-gui": dedent("""
+        Open a narrow persistent form for repeated corpus captures.
+
+          skydom-capture-gui
+
+        Fixed metadata fields: mode, initial_moves, board_variant, has_ice.
+        Four extra name/value metadata rows are also available. Form values
+        persist between captures and are restored on the next launch.
+    """),
     "analyze-corpus": dedent("""
         Run the current BoardDetector against every captured corpus screen.
 
@@ -120,6 +129,7 @@ def _parser() -> argparse.ArgumentParser:
               skydom-debug-vision         visual board-geometry debugger
               skydom-debug-tiles          interactive tile debugger / selective export
               skydom-capture-screen       save one full game-area corpus screenshot
+              skydom-capture-gui         narrow persistent capture form
               skydom-analyze-corpus       evaluate all corpus screenshots offline
               skydom-collect-tiles        capture and collect all active cells
               skydom-dataset-stats        summarize/validate human labels
@@ -128,7 +138,8 @@ def _parser() -> argparse.ArgumentParser:
 
             Screen-corpus workflow:
               skydom-capture-screen --configure
-              skydom-capture-screen level-27 --meta mode=normal
+              skydom-capture-gui
+              # or: skydom-capture-screen level-27 --meta mode=normal
               skydom-analyze-corpus
 
             Tile-labeling workflow:
@@ -140,6 +151,7 @@ def _parser() -> argparse.ArgumentParser:
 
             More detail:
               skydom help capture-screen
+              skydom help capture-gui
               skydom help analyze-corpus
               skydom help workflow
               skydom help collect
