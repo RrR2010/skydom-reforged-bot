@@ -35,7 +35,7 @@ class TileSemanticConfig:
     carrot_max_residual_fraction: float = 0.06
 
     chain_min_residual_fraction: float = 0.08
-    chain_min_shape_anomaly: float = 2.25
+    chain_min_shape_anomaly: float = 1.75
     chain_low_solidity: float = 0.90
     chain_low_circularity: float = 0.64
 
