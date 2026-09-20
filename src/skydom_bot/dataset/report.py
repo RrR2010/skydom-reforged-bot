@@ -203,7 +203,7 @@ def build_collection_report(stats: DatasetStatistics) -> str:
                     captures = powerup_color_captures.get(powerup, {}).get(color, 0)
                     weak.append(
                         f"{color}: {count} samples, "
-                        f"{_capture_text(capture groups, provenance_trusted=provenance_trusted)} capture groups, "
+                        f"{_capture_text(captures, provenance_trusted=provenance_trusted)} capture groups, "
                         f"{band.name}"
                     )
             detail = "; ".join(weak) if weak else "all observed colors at baseline or better"
