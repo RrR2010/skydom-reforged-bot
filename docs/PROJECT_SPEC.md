@@ -80,6 +80,8 @@ dataset/
 
 `sample_id` is derived from image content, providing stable de-duplication.
 
+Newly collected records also store `capture_ids`: stable hashes of the detected board capture. Re-encountering the same crop on different boards appends provenance instead of discarding it. This metadata is intended for leakage-safe train/validation grouping; older records without it remain valid but should not be used as held-out validation unless their provenance is recovered.
+
 Each record deliberately separates:
 
 ```text
