@@ -215,3 +215,20 @@ Color recognition and shape recognition now deliberately use different spatial m
 - **Shape mask:** nearly full-cell rectangular support, with only a small inset to avoid the purple grid/frame. It preserves silhouettes that extend beyond the center, such as carrots, chains, and large special pieces.
 
 This avoids clipping shape descriptors with a mask that was designed for an entirely different task.
+
+
+### Stabilized shape segmentation
+
+Real game captures showed that tiny per-cell visual differences could radically change raw binary masks. The shape pipeline now uses:
+
+- the already classified tile color as an additional segmentation cue;
+- nearly full-cell spatial support;
+- morphological close/open cleanup;
+- the connected component nearest the known cell center as the base tile silhouette;
+- a separate residual-overlay mask for bright/saturated pixels excluded from that base component;
+- significant-hole counting instead of counting every threshold artifact;
+- rotation-aware bounding boxes via `cv2.minAreaRect`.
+
+This makes descriptors less sensitive to highlights, antialiasing, and differently colored overlays such as chains. Axis-aligned aspect ratio is still reported, but `oriented_aspect_ratio` is the more useful elongation feature for diagonal pieces such as carrots.
+
+The interactive board panel is now cropped to `BoardGeometry.bounds`. Click coordinates are translated back to full-screen coordinates internally, so the user sees only the relevant board without changing cell hit-testing.
