@@ -3,7 +3,7 @@
 ## Immediate validation
 
 - [x] Pull latest branch and run full `pytest` after Label Studio importer changes (50 passed).
-- [ ] Re-run full `pytest` after board-capture provenance changes.
+- [ ] Re-run full `pytest` after board-capture provenance and adjacent-clear taxonomy changes.
 - [x] Submit several annotations in Label Studio and confirm Target Storage files appear in `dataset/output/annotations`.
 - [x] Run `skydom-import-label-studio` against real Target Storage output.
 - [x] Verify imported `labels` match the UI selections and `suggested` remains unchanged.
@@ -15,7 +15,7 @@
 - [ ] Annotate representative normal pieces of every color.
 - [ ] Annotate carrots in multiple colors/orientations.
 - [ ] Annotate chained pieces, especially same-color chain cases.
-- [ ] Synchronize `TileColor.NONE`, `TileKind.NONE`, and `TileBlocker.ADJACENT_CLEAR` across code, Label Studio config, importer/statistics validation, and tests before annotating the new whole-cell obstacle.
+- [x] Synchronize `TileColor.NONE`, `TileKind.NONE`, and `TileBlocker.ADJACENT_CLEAR` across code, Label Studio config, importer/statistics validation, debugger support, and tests.
 - [x] Identify initial real power-up types: flyer, row, column, bomb, color-remover.
 - [x] Add observed `TilePowerup` enum values and synchronize Label Studio config.
 - [ ] Capture animation/highlight/hint states and decide whether they are excluded, separately labeled, or temporally filtered.
