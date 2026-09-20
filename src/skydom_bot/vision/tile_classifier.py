@@ -26,6 +26,9 @@ class TileClassifierConfig:
     shape_component_min_largest_ratio: float = 0.12
     shape_component_min_area_ratio: float = 0.015
     shape_bridge_ratio: float = 0.18
+    shape_background_delta_min: float = 22.0
+    neutral_overlay_saturation_max: int = 85
+    neutral_overlay_value_min: int = 220
     histogram_bins: int = 180
     min_class_confidence: float = 0.50
 
@@ -40,6 +43,8 @@ class TileDiagnostics:
     foreground_mask: UInt8Image
     shape_foreground_mask: UInt8Image
     overlay_foreground_mask: UInt8Image
+    neutral_overlay_mask: UInt8Image
+    background_distance_mask: UInt8Image
     hue_histogram: NDArray[np.float64]
     class_scores: dict[TileColor, float]
     dominant_hue: float | None
@@ -107,7 +112,13 @@ class TileClassifier:
         scores = self._class_scores(histogram)
         color, confidence = self._select_color(scores, foreground_fraction)
 
-        shape_foreground, overlay_foreground = self._shape_masks(
+        (
+            shape_foreground,
+            overlay_foreground,
+            neutral_overlay,
+            background_distance,
+        ) = self._shape_masks(
+            crop,
             hsv,
             saturated,
             color,
@@ -128,6 +139,8 @@ class TileClassifier:
             foreground_mask=foreground,
             shape_foreground_mask=shape_foreground,
             overlay_foreground_mask=overlay_foreground,
+            neutral_overlay_mask=neutral_overlay,
+            background_distance_mask=background_distance,
             hue_histogram=histogram,
             class_scores=scores,
             dominant_hue=dominant_hue,
@@ -136,10 +149,11 @@ class TileClassifier:
 
     def _shape_masks(
         self,
+        crop_rgb: UInt8Image,
         hsv: UInt8Image,
         saturated: UInt8Image,
         color: TileColor,
-    ) -> tuple[UInt8Image, UInt8Image]:
+    ) -> tuple[UInt8Image, UInt8Image, UInt8Image, UInt8Image]:
         """Build stable base-shape and residual-overlay masks.
 
         Shape segmentation should describe the tile's own silhouette rather
@@ -165,9 +179,50 @@ class TileClassifier:
         )
         full_foreground = cv2.bitwise_and(region, saturated)
 
+        # Estimate the local board/background color from corner samples, then
+        # reject pixels too similar to that background. This matters most for
+        # blue pieces because the board itself is also blue and otherwise fills
+        # the shape mask.
+        lab = cv2.cvtColor(crop_rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
+        patch_h = max(2, int(round(height * 0.14)))
+        patch_w = max(2, int(round(width * 0.14)))
+        corner_pixels = np.concatenate(
+            (
+                lab[:patch_h, :patch_w].reshape(-1, 3),
+                lab[:patch_h, width - patch_w :].reshape(-1, 3),
+                lab[height - patch_h :, :patch_w].reshape(-1, 3),
+                lab[height - patch_h :, width - patch_w :].reshape(-1, 3),
+            ),
+            axis=0,
+        )
+        background_lab = np.median(corner_pixels, axis=0)
+        delta = np.linalg.norm(lab - background_lab, axis=2)
+        background_distance = np.where(
+            delta >= self.config.shape_background_delta_min,
+            255,
+            0,
+        ).astype(np.uint8)
+
         hue = hsv[:, :, 0]
         color_mask = self._color_hue_mask(hue, color)
         candidate = cv2.bitwise_and(full_foreground, color_mask)
+        candidate = cv2.bitwise_and(candidate, background_distance)
+
+        # White/neutral decorations are weak in the hue histogram but can be
+        # strong evidence of a power-up or special overlay. Keep them separate
+        # from the base color mask.
+        neutral_overlay = cv2.inRange(
+            hsv,
+            np.array(
+                [0, 0, self.config.neutral_overlay_value_min],
+                dtype=np.uint8,
+            ),
+            np.array(
+                [179, self.config.neutral_overlay_saturation_max, 255],
+                dtype=np.uint8,
+            ),
+        )
+        neutral_overlay = cv2.bitwise_and(neutral_overlay, region)
 
         kernel = np.ones((3, 3), dtype=np.uint8)
         candidate = cv2.morphologyEx(candidate, cv2.MORPH_CLOSE, kernel)
@@ -232,7 +287,7 @@ class TileClassifier:
                 ).astype(np.uint8)
 
         overlay = cv2.bitwise_and(full_foreground, cv2.bitwise_not(shape))
-        return shape, overlay
+        return shape, overlay, neutral_overlay, background_distance
 
     @staticmethod
     def _color_hue_mask(hue: NDArray[np.uint8], color: TileColor) -> UInt8Image:
