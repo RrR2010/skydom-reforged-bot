@@ -430,8 +430,21 @@ The next dataset milestone is human annotation plus a train/validation split. On
 
 ### Label Studio integration
 
-The Label Studio integration is storage-first and incremental. The exporter no
-longer writes one monolithic `tasks.json` for repeated manual import.
+The Label Studio integration uses a storage-first, incremental layout:
+
+```text
+dataset/
+  images/                  # canonical crops collected by the bot
+  records/                 # canonical sample metadata
+  input/                   # everything Label Studio reads
+    batch-tasks-0001.json
+    batch-tasks-0002.json
+    images/
+      <sample-id>.png
+  output/
+    annotations/           # Label Studio Target Storage
+  label-studio-config.xml
+```
 
 Run:
 
@@ -439,106 +452,108 @@ Run:
 skydom-export-label-studio
 ```
 
-It creates:
+The exporter copies any missing canonical crops into `dataset/input/images`
+and creates a new immutable batch file containing only samples that have not
+appeared in earlier `batch-tasks-*.json` files.
+
+For example:
 
 ```text
-dataset/
-  images/
-    <sample-id>.png
-  records/
-    <sample-id>.json
-  label_studio/
-    config.xml
-    source/
-      tasks/
-        <sample-id>.json
-    target/
-      annotations/
+first export:
+  batch-tasks-0001.json -> 56 samples
+
+later, after collecting 12 new samples:
+  batch-tasks-0002.json -> 12 new samples
 ```
 
-Each source task file is immutable and named by the crop's content-derived
-`sample_id`. Re-running the exporter leaves existing task files untouched and
-creates files only for newly collected samples. This makes Label Studio source
-storage synchronization naturally incremental.
+Existing batch files are never rewritten. If there are no new samples, no empty
+batch is created.
 
-Each task includes:
+Each task contains:
 
-- the existing crop through `/data/local-files/?d=dataset/images/<sample-id>.png`;
+- image URL: `/data/local-files/?d=input/images/<sample-id>.png`;
 - `sample_id`;
-- row, column, and capture source metadata;
-- the classical recognizer output as Label Studio `predictions`, never as
-  human annotations.
-
-The `target/annotations` directory is created in advance for Label Studio
-Target Storage, so submitted annotations can be persisted outside Label
-Studio's internal database.
+- row, column, and capture-source metadata;
+- classical recognizer output as Label Studio `predictions`, never as human
+  ground truth.
 
 #### Local Label Studio startup
 
-Keep Label Studio in its separate Python 3.12 environment. The repository
-contains a launcher that sets the required environment variables for the
-current process and starts Label Studio:
+Keep Label Studio in its separate Python 3.12 environment and start it through
+the repository launcher:
 
 ```powershell
 .\scripts\start-label-studio.ps1
 ```
 
-The launcher sets `LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT` to the repository
-root, not directly to `dataset`. Label Studio requires each configured Local
-Files storage to be a subdirectory of that document root.
-
-These environment variables are process-local. Closing the terminal loses
-them, but the launcher script is persistent project configuration, so there is
-no need to define machine-wide variables.
-
-#### Recommended Source Storage
-
-Configure one Local Files source storage with:
+The launcher sets:
 
 ```text
+LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED=true
+LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT=<repo>\dataset
+```
+
+The variables are process-local, but the launcher is persistent project
+configuration, so they do not need to be recreated manually in every terminal.
+
+#### Source Storage
+
+Configure one Local Files Source Storage:
+
+```text
+Storage Title:
+Tile Tasks
+
 Absolute local path:
-<repo>\dataset
+<repo>\dataset\input
 
 Import Method:
 Tasks
 
-File filter:
-only JSON files under label_studio/source/tasks
+File Name Filter:
+^batch-tasks-.*\.json$
 
 Scan all sub-folders:
-enabled
+off
 ```
 
-The exact filter syntax is Label Studio UI/version dependent; the important
-constraint is that only task-definition JSON files from
-`label_studio/source/tasks` are imported. Do not import `records/*.json` as
-tasks.
+Because the JSON batches live directly in `input/` and the images live in
+`input/images/`, one storage subtree contains both task definitions and media.
+With subfolder scanning disabled, the image files are not imported as
+standalone tasks.
 
-This source storage also keeps the local image URLs resolvable because the
-storage root contains both `images/` and `label_studio/source/tasks/`.
-
-After collecting new boards:
+After collecting a new board:
 
 ```powershell
 skydom-collect-tiles --screen --monitor 1
 skydom-export-label-studio
 ```
 
-then synchronize the Label Studio source storage. Only newly created task files
-should become new Label Studio tasks.
+then synchronize the `Tile Tasks` Source Storage. Only the newly generated
+batch file should create new Label Studio tasks.
 
-#### Recommended Target Storage
+#### Target Storage
 
-Configure Local Files Target Storage with:
+Configure one Local Files Target Storage:
 
 ```text
-<repo>\dataset\label_studio\target\annotations
+Storage Title:
+Human Annotations
+
+Absolute local path:
+<repo>\dataset\output\annotations
+
+Can delete objects from storage:
+off
 ```
 
-This directory is reserved for submitted human annotations. The next pipeline
-step is to normalize those Label Studio results back into
-`dataset/records/*.json -> labels`, preserving `suggested` as the baseline
-prediction and human labels as ground truth.
+Submitted annotations are therefore persisted outside Label Studio's internal
+database and can later be normalized back into:
 
-The labeling interface remains `dataset/label_studio/config.xml` and exposes
-four independent single-choice dimensions: color, kind, blocker, and power-up.
+```text
+dataset/records/<sample-id>.json -> labels
+```
+
+The labeling interface is stored at `dataset/label-studio-config.xml` and
+exposes four independent single-choice dimensions: color, kind, blocker, and
+power-up.
