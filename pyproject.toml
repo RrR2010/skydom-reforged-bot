@@ -27,6 +27,8 @@ skydom-collect-tiles = "skydom_bot.dataset.cli:main"
 skydom-dataset-stats = "skydom_bot.dataset.stats_cli:main"
 skydom-export-label-studio = "skydom_bot.dataset.label_studio_cli:main"
 skydom-import-label-studio = "skydom_bot.dataset.label_studio_import_cli:main"
+skydom-capture-screen = "skydom_bot.corpus.capture_cli:main"
+skydom-analyze-corpus = "skydom_bot.corpus.analysis_cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/skydom_bot"]
