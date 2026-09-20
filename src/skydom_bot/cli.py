@@ -26,9 +26,9 @@ def _read_rgb(path: Path) -> UInt8Image:
 def build_parser() -> argparse.ArgumentParser:
     """Build the CLI argument parser."""
     parser = argparse.ArgumentParser(description="Inspect Skydom board geometry from an image or screen capture.")
-    source = parser.add_mutually_exclusive_group(required=True)
+    source = parser.add_mutually_exclusive_group()
     source.add_argument("--image", type=Path, help="Input screenshot path.")
-    source.add_argument("--screen", action="store_true", help="Capture the primary monitor.")
+    source.add_argument("--screen", action="store_true", help="Capture a monitor (default when --image is omitted).")
     parser.add_argument("--monitor", type=int, default=1, help="MSS monitor index used with --screen.")
     parser.add_argument("--output", type=Path, default=Path("artifacts/board-overlay.png"))
     return parser
