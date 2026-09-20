@@ -30,8 +30,8 @@ class BoardDetectorConfig:
     min_component_area_ratio: float = 0.03
     pitch_min_px: int = 28
     pitch_max_px: int = 140
-    occupancy_threshold: float = 0.035
-    cell_inset_ratio: float = 0.08
+    occupancy_threshold: float = 0.12
+    cell_corner_ratio: float = 0.16
 
 
 class BoardDetectionError(RuntimeError):
@@ -52,7 +52,7 @@ class BoardDetector:
         2. Keep the largest plausible connected component.
         3. Estimate cell pitch from periodic image-gradient autocorrelation.
         4. Divide the component into a regular logical grid and retain cells
-           whose segmented-background occupancy indicates that they exist.
+           whose corner samples contain the board background.
         """
         self._validate_image(image_rgb)
         mask = self._board_background_mask(image_rgb)
@@ -145,6 +145,20 @@ class BoardDetector:
             raise BoardDetectionError("Could not find a periodic grid signal in the board image.")
         return float(pitch)
 
+    def _corner_occupancy(self, cell_mask: UInt8Image) -> float:
+        """Measure board-background evidence where game pieces rarely occlude it."""
+        height, width = cell_mask.shape
+        sample_w = max(2, int(round(width * self.config.cell_corner_ratio)))
+        sample_h = max(2, int(round(height * self.config.cell_corner_ratio)))
+        patches = (
+            cell_mask[:sample_h, :sample_w],
+            cell_mask[:sample_h, width - sample_w :],
+            cell_mask[height - sample_h :, :sample_w],
+            cell_mask[height - sample_h :, width - sample_w :],
+        )
+        pixels = sum(patch.size for patch in patches)
+        return float(sum(np.count_nonzero(patch) for patch in patches) / pixels) if pixels else 0.0
+
     def _extract_cells(
         self,
         component_mask: UInt8Image,
@@ -162,10 +176,12 @@ class BoardDetector:
                 x1 = int(round((col + 1) * pitch_x))
                 y0 = int(round(row * pitch_y))
                 y1 = int(round((row + 1) * pitch_y))
-                dx = max(1, int((x1 - x0) * self.config.cell_inset_ratio))
-                dy = max(1, int((y1 - y0) * self.config.cell_inset_ratio))
-                region = local[y0 + dy : y1 - dy, x0 + dx : x1 - dx]
-                occupancy = float(np.count_nonzero(region) / region.size) if region.size else 0.0
+                region = local[y0:y1, x0:x1]
+
+                # Large square pieces can cover almost the whole cell interior.
+                # Corners preserve much more board-color evidence, while cells
+                # outside an irregular board have almost none.
+                occupancy = self._corner_occupancy(region)
                 if occupancy < self.config.occupancy_threshold:
                     continue
 
@@ -185,6 +201,6 @@ class BoardDetector:
     @staticmethod
     def _confidence(bounds: Rect, pitch_x: float, pitch_y: float, cells: list[Cell]) -> float:
         square_score = 1.0 - min(1.0, abs(pitch_x - pitch_y) / max(pitch_x, pitch_y))
-        occupancy_score = min(1.0, float(np.median([cell.occupancy for cell in cells])) / 0.20)
+        occupancy_score = min(1.0, float(np.median([cell.occupancy for cell in cells])) / 0.55)
         size_score = 1.0 if min(bounds.width, bounds.height) >= min(pitch_x, pitch_y) * 3 else 0.5
         return float(np.clip(0.55 * square_score + 0.35 * occupancy_score + 0.10 * size_score, 0.0, 1.0))
