@@ -61,10 +61,17 @@ Live capture currently captures the whole monitor.
 
 ## Visual perception debugger
 
-The visual debugger runs the exact same detection pipeline but retains its intermediate images and signals.
+The visual debugger runs the exact same detection pipeline but retains its intermediate images and signals. It also prints the normal `skydom-inspect` summary and writes `artifacts/board-overlay.png`, so running both commands separately is unnecessary.
 
 ```powershell
 skydom-debug-vision --screen --monitor 1
+```
+
+During iterative development the debugger opens at the first newly interesting step rather than always restarting at step 1. The current default is **step 10**. Override it whenever needed:
+
+```powershell
+skydom-debug-vision --screen --monitor 1 --start-step 1
+skydom-debug-vision --screen --monitor 1 --start-step 11
 ```
 
 Navigate with **Previous / Next** or the arrow keys. The steps show:
@@ -81,6 +88,8 @@ Navigate with **Previous / Next** or the arrow keys. The steps show:
 10. ternary visual evidence: strong / uncertain / absent;
 11. structural reconciliation using cardinal-neighbor support;
 12. final board topology.
+
+The debugger therefore acts as the richer inspection command; `skydom-inspect` remains available as the lightweight non-interactive version.
 
 To export every step as a PNG:
 
