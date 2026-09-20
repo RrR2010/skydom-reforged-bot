@@ -6,8 +6,6 @@ import argparse
 from dataclasses import asdict, dataclass, field
 import json
 from pathlib import Path
-from typing import Mapping
-
 from skydom_bot.corpus.capture import load_region, save_capture
 
 
