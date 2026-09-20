@@ -33,6 +33,7 @@ class BoardDetectorConfig:
     ice_value_min: int = 100
 
     min_component_area_ratio: float = 0.015
+    min_component_footprint_ratio: float = 0.030
     min_fragment_area_ratio: float = 0.001
     component_join_gap_ratio: float = 0.07
     component_projection_overlap: float = 0.50
@@ -52,6 +53,30 @@ class BoardDetectorConfig:
     secondary_component_keep_ratio: float = 0.35
     secondary_component_min_mean_evidence: float = 0.80
     secondary_component_min_strong_fraction: float = 0.60
+
+    # Competitive modes can render a miniature opponent board next to the
+    # player board. At exact 1:2 or 1:3 scale ratios, several miniature cells
+    # can alias into one logical player cell and still produce strong occupancy.
+    # Validate secondary components for repeated sub-grid structure before
+    # accepting high occupancy as same-scale board evidence.
+    secondary_component_scale_min_cells: int = 6
+    secondary_component_scale_min_span_cells: float = 3.0
+    secondary_component_subgrid_divisors: tuple[int, ...] = (2, 3)
+    secondary_component_subgrid_min_score: float = 0.30
+    secondary_component_subgrid_relative_score: float = 0.85
+    secondary_component_subgrid_lag_tolerance_px: int = 2
+
+    # A miniature board can become 4-connected to the player board after
+    # projection onto the player's logical grid. Detect scale locally in
+    # overlapping neighborhoods so a P/2 or P/3 region can still be separated
+    # even when connected-component analysis sees only one component.
+    local_scale_window_radius: int = 1
+    local_scale_min_active_cells: int = 4
+    local_scale_min_votes: int = 2
+    local_scale_vote_ratio: float = 0.50
+    local_scale_expand_min_vote: int = 1
+    local_scale_expand_min_seed_fraction: float = 0.20
+
     cell_corner_ratio: float = 0.16
 
 
@@ -69,6 +94,20 @@ class PitchDiagnostics:
 
 
 @dataclass(frozen=True, slots=True)
+class ComponentScaleDiagnostics:
+    """Scale-consistency evidence for one logical topology component."""
+
+    label: int
+    cells: int
+    axes_tested: int
+    expected_scores: tuple[float, ...]
+    subgrid_scores: tuple[float, ...]
+    subgrid_divisors: tuple[int | None, ...]
+    estimated_scale_ratio: float | None
+    status: str
+
+
+@dataclass(frozen=True, slots=True)
 class BoardDetectionDiagnostics:
     """Intermediate images and arrays for visual inspection of detection."""
 
@@ -81,6 +120,7 @@ class BoardDetectionDiagnostics:
     crop_gray: FloatImage
     pitch_x: PitchDiagnostics
     pitch_y: PitchDiagnostics
+    shared_pitch: float
     occupancy: NDArray[np.float32]
     evidence_state: NDArray[np.uint8]
     cardinal_support: NDArray[np.uint8]
@@ -90,6 +130,10 @@ class BoardDetectionDiagnostics:
     topology_component_sizes: tuple[int, ...]
     topology_component_mean_evidence: tuple[float, ...]
     topology_component_strong_fraction: tuple[float, ...]
+    topology_component_scale: tuple[ComponentScaleDiagnostics, ...]
+    ambiguous_topology_components: tuple[int, ...]
+    local_subgrid_votes: NDArray[np.uint8]
+    local_subgrid_topology: NDArray[np.bool_]
     selected_topology: NDArray[np.bool_]
 
 
@@ -103,14 +147,29 @@ class BoardDetector:
     def __init__(self, config: BoardDetectorConfig | None = None) -> None:
         self.config = config or BoardDetectorConfig()
 
-    def detect(self, image_rgb: UInt8Image) -> BoardGeometry:
-        """Detect board geometry from an RGB image."""
-        geometry, _ = self.detect_with_diagnostics(image_rgb)
+    def detect(
+        self,
+        image_rgb: UInt8Image,
+        *,
+        preferred_board_point: Point | None = None,
+    ) -> BoardGeometry:
+        """Detect board geometry from an RGB image.
+
+        preferred_board_point is an optional human-selection hook. A match-level
+        UI may ask the player to click the correct board once, retain that pixel
+        point for the match, and pass it on subsequent detections.
+        """
+        geometry, _ = self.detect_with_diagnostics(
+            image_rgb,
+            preferred_board_point=preferred_board_point,
+        )
         return geometry
 
     def detect_with_diagnostics(
         self,
         image_rgb: UInt8Image,
+        *,
+        preferred_board_point: Point | None = None,
     ) -> tuple[BoardGeometry, BoardDetectionDiagnostics]:
         """Detect geometry and preserve the intermediate perception pipeline.
 
@@ -128,9 +187,11 @@ class BoardDetector:
         pitch_x_diag = self._pitch_diagnostics(crop, axis=1)
         pitch_y_diag = self._pitch_diagnostics(crop, axis=0)
 
-        # Both axes describe the same square-cell grid. Combining them prevents
-        # one partially occluded axis from dominating the result.
-        pitch = float(np.median([pitch_x_diag.selected_pitch, pitch_y_diag.selected_pitch]))
+        # Both axes describe the same square-cell grid. Select one shared
+        # fundamental instead of averaging two independently chosen peaks.
+        # This rejects one-axis aliases such as X=58 when both axes support 65
+        # and 130 is merely the 2x harmonic.
+        pitch = self._shared_pitch(pitch_x_diag, pitch_y_diag)
         cols = max(1, int(round(bounds.width / pitch)))
         rows = max(1, int(round(bounds.height / pitch)))
         pitch_x = bounds.width / cols
@@ -156,8 +217,19 @@ class BoardDetector:
             component_sizes,
             component_mean_evidence,
             component_strong_fraction,
+            component_scale,
+            local_subgrid_votes,
+            local_subgrid_topology,
             selected_topology,
-        ) = self._select_primary_topology(reconciled_topology, occupancy)
+        ) = self._select_primary_topology(
+            reconciled_topology,
+            occupancy,
+            image_rgb=image_rgb,
+            bounds=bounds,
+            pitch_x=pitch_x,
+            pitch_y=pitch_y,
+            preferred_board_point=preferred_board_point,
+        )
 
         (
             final_bounds,
@@ -202,6 +274,7 @@ class BoardDetector:
             crop_gray=crop_gray,
             pitch_x=pitch_x_diag,
             pitch_y=pitch_y_diag,
+            shared_pitch=pitch,
             occupancy=occupancy,
             evidence_state=evidence_state,
             cardinal_support=cardinal_support,
@@ -211,6 +284,12 @@ class BoardDetector:
             topology_component_sizes=component_sizes,
             topology_component_mean_evidence=component_mean_evidence,
             topology_component_strong_fraction=component_strong_fraction,
+            topology_component_scale=component_scale,
+            ambiguous_topology_components=tuple(
+                item.label for item in component_scale if item.status == "ambiguous"
+            ),
+            local_subgrid_votes=local_subgrid_votes,
+            local_subgrid_topology=local_subgrid_topology,
             selected_topology=selected_topology,
         )
         return geometry, diagnostics
@@ -312,11 +391,9 @@ class BoardDetector:
         for label in fragments:
             groups.setdefault(find(label), []).append(label)
 
-        candidates: list[tuple[int, list[int], Rect]] = []
+        candidates: list[tuple[int, int, list[int], Rect]] = []
         for group in groups.values():
             area = sum(int(stats[label, cv2.CC_STAT_AREA]) for label in group)
-            if area < image_area * self.config.min_component_area_ratio:
-                continue
 
             left = min(int(stats[label, cv2.CC_STAT_LEFT]) for label in group)
             top = min(int(stats[label, cv2.CC_STAT_TOP]) for label in group)
@@ -328,12 +405,37 @@ class BoardDetector:
                 int(stats[label, cv2.CC_STAT_TOP] + stats[label, cv2.CC_STAT_HEIGHT])
                 for label in group
             )
-            candidates.append((area, group, Rect(left, top, right - left, bottom - top)))
+            bounds = Rect(left, top, right - left, bottom - top)
+            footprint_area = bounds.width * bounds.height
+
+            # Dense boards contribute enough masked pixels directly. Sparse
+            # island layouts may contain little board-colored surface overall
+            # while still spanning a large, coherent playfield. Accept either
+            # kind of evidence instead of forcing all levels through one fill-
+            # ratio assumption.
+            dense_enough = (
+                area >= image_area * self.config.min_component_area_ratio
+            )
+            broad_enough = (
+                footprint_area
+                >= image_area * self.config.min_component_footprint_ratio
+            )
+            if not dense_enough and not broad_enough:
+                continue
+
+            candidates.append((footprint_area, area, group, bounds))
 
         if not candidates:
-            raise BoardDetectionError("No grouped component is large enough to be the board.")
+            raise BoardDetectionError(
+                "No grouped component is large or spatially broad enough to be the board."
+            )
 
-        _, selected_labels, bounds = max(candidates, key=lambda item: item[0])
+        # Footprint is the more stable signal for sparse levels. Pixel area is
+        # retained as a deterministic tie-breaker for similarly sized groups.
+        _, _, selected_labels, bounds = max(
+            candidates,
+            key=lambda item: (item[0], item[1]),
+        )
         component = np.isin(labels, selected_labels).astype(np.uint8) * 255
         return bounds, component
 
@@ -385,6 +487,85 @@ class BoardDetector:
             peaks=peaks,
             selected_pitch=float(pitch),
         )
+
+    def _shared_pitch(
+        self,
+        pitch_x: PitchDiagnostics,
+        pitch_y: PitchDiagnostics,
+    ) -> float:
+        """Choose one square-grid pitch jointly from both axis signals.
+
+        Per-axis peak picking can disagree when level geometry creates a strong
+        non-grid spacing on only one axis. Candidate lags are clustered from
+        both axes, scored by their weakest normalized cross-axis support, and
+        then reduced to the smallest well-supported fundamental when a larger
+        candidate is an integer harmonic.
+
+        This preserves the existing preference for 60 over 120 while rejecting
+        one-axis aliases such as 58 when both axes strongly support 65.
+        """
+        candidates = sorted(set(pitch_x.peaks) | set(pitch_y.peaks))
+        if not candidates:
+            candidates = [
+                int(round(pitch_x.selected_pitch)),
+                int(round(pitch_y.selected_pitch)),
+            ]
+
+        def axis_max(diag: PitchDiagnostics) -> float:
+            finite = diag.scores[np.isfinite(diag.scores)]
+            positive = finite[finite > 0]
+            return float(positive.max()) if positive.size else 1.0
+
+        max_x = axis_max(pitch_x)
+        max_y = axis_max(pitch_y)
+        tolerance = self.config.secondary_component_subgrid_lag_tolerance_px
+
+        scored: list[tuple[float, float, int]] = []
+        for candidate in candidates:
+            score_x = self._autocorrelation_at(
+                pitch_x.profile,
+                candidate,
+                tolerance=tolerance,
+            )
+            score_y = self._autocorrelation_at(
+                pitch_y.profile,
+                candidate,
+                tolerance=tolerance,
+            )
+            norm_x = max(0.0, score_x / max_x)
+            norm_y = max(0.0, score_y / max_y)
+            weakest = min(norm_x, norm_y)
+            mean = (norm_x + norm_y) / 2.0
+            scored.append((weakest, mean, candidate))
+
+        strongest_weakest = max(item[0] for item in scored)
+        support_floor = strongest_weakest * self.config.pitch_peak_ratio
+        supported = [
+            item
+            for item in scored
+            if item[0] >= support_floor and item[0] > 0
+        ]
+        if not supported:
+            supported = [max(scored, key=lambda item: (item[0], item[1]))]
+
+        supported_lags = sorted(item[2] for item in supported)
+
+        # Prefer a smaller candidate only when another supported candidate is
+        # clearly its integer harmonic. Mere numerical smallness is not enough.
+        for candidate in supported_lags:
+            for harmonic in supported_lags:
+                if harmonic <= candidate:
+                    continue
+                ratio = harmonic / candidate
+                nearest = round(ratio)
+                if nearest >= 2 and abs(ratio - nearest) <= 0.08:
+                    return float(candidate)
+
+        best = max(
+            supported,
+            key=lambda item: (item[0], item[1], -abs(item[2] - np.median(supported_lags))),
+        )
+        return float(best[2])
 
     def _estimate_pitch(self, crop_rgb: UInt8Image, axis: int) -> float:
         """Estimate the cell spacing for one axis."""
@@ -561,45 +742,345 @@ class BoardDetector:
         reconciled = strong | promoted_structural | assisted
         return state, support, reconciled
 
+    @staticmethod
+    def _autocorrelation_at(
+        profile: NDArray[np.float32],
+        lag: int,
+        *,
+        tolerance: int,
+    ) -> float:
+        """Return the strongest normalized autocorrelation near one lag."""
+        best = float("-inf")
+        for candidate in range(max(1, lag - tolerance), lag + tolerance + 1):
+            if candidate >= len(profile):
+                continue
+            left = profile[:-candidate]
+            right = profile[candidate:]
+            denominator = float(np.linalg.norm(left) * np.linalg.norm(right))
+            if denominator <= 0:
+                continue
+            best = max(best, float(np.dot(left, right) / denominator))
+        return best if np.isfinite(best) else 0.0
+
+    def _component_scale_diagnostics(
+        self,
+        image_rgb: UInt8Image,
+        bounds: Rect,
+        labels: NDArray[np.int32],
+        label: int,
+        *,
+        pitch_x: float,
+        pitch_y: float,
+        cells: int,
+    ) -> ComponentScaleDiagnostics:
+        """Detect harmonic sub-grids inside one logical board component.
+
+        A miniature opponent board can alias onto the player grid when two or
+        three miniature cells fit inside one player cell. The projected
+        occupancy may still look strong, so this check works in pixel space:
+        repeated edge structure at P/2 or P/3 is compared with the expected
+        player pitch P independently on both axes.
+
+        Rejection requires agreement across at least two measurable axes. A
+        one-axis conflict is surfaced as ambiguous instead of being discarded,
+        preserving narrow or unusual legitimate player-board islands.
+        """
+        positions = np.argwhere(labels == label)
+        if positions.size == 0 or cells < self.config.secondary_component_scale_min_cells:
+            return ComponentScaleDiagnostics(
+                label=label,
+                cells=cells,
+                axes_tested=0,
+                expected_scores=(),
+                subgrid_scores=(),
+                subgrid_divisors=(),
+                estimated_scale_ratio=None,
+                status="insufficient-evidence",
+            )
+
+        min_row, min_col = positions.min(axis=0)
+        max_row, max_col = positions.max(axis=0)
+        x0 = bounds.x + int(round(float(min_col) * pitch_x))
+        x1 = bounds.x + int(round(float(max_col + 1) * pitch_x))
+        y0 = bounds.y + int(round(float(min_row) * pitch_y))
+        y1 = bounds.y + int(round(float(max_row + 1) * pitch_y))
+        crop = image_rgb[y0:y1, x0:x1]
+        if crop.size == 0:
+            return ComponentScaleDiagnostics(
+                label=label,
+                cells=cells,
+                axes_tested=0,
+                expected_scores=(),
+                subgrid_scores=(),
+                subgrid_divisors=(),
+                estimated_scale_ratio=None,
+                status="insufficient-evidence",
+            )
+
+        gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY).astype(np.float32)
+        expected_scores: list[float] = []
+        subgrid_scores: list[float] = []
+        subgrid_divisors: list[int | None] = []
+        detected_divisors: list[int] = []
+
+        for axis, expected_pitch in ((1, pitch_x), (0, pitch_y)):
+            profile_length = gray.shape[axis]
+            if (
+                profile_length
+                < expected_pitch * self.config.secondary_component_scale_min_span_cells
+            ):
+                continue
+
+            derivative = np.abs(np.diff(gray, axis=axis))
+            profile = derivative.mean(axis=1 - axis).astype(np.float32)
+            profile -= profile.mean()
+            expected_lag = max(1, int(round(expected_pitch)))
+            expected_score = self._autocorrelation_at(
+                profile,
+                expected_lag,
+                tolerance=self.config.secondary_component_subgrid_lag_tolerance_px,
+            )
+
+            best_score = float("-inf")
+            best_divisor: int | None = None
+            for divisor in self.config.secondary_component_subgrid_divisors:
+                lag = max(1, int(round(expected_pitch / divisor)))
+                score = self._autocorrelation_at(
+                    profile,
+                    lag,
+                    tolerance=self.config.secondary_component_subgrid_lag_tolerance_px,
+                )
+                if score > best_score:
+                    best_score = score
+                    best_divisor = divisor
+
+            best_score = best_score if np.isfinite(best_score) else 0.0
+            expected_scores.append(expected_score)
+            subgrid_scores.append(best_score)
+
+            is_subgrid = (
+                best_divisor is not None
+                and best_score >= self.config.secondary_component_subgrid_min_score
+                and best_score
+                >= expected_score * self.config.secondary_component_subgrid_relative_score
+            )
+            subgrid_divisors.append(best_divisor if is_subgrid else None)
+            if is_subgrid and best_divisor is not None:
+                detected_divisors.append(best_divisor)
+
+        axes_tested = len(expected_scores)
+        if axes_tested < 2:
+            status = "insufficient-evidence"
+            ratio = None
+        elif (
+            len(detected_divisors) == axes_tested
+            and len(set(detected_divisors)) == 1
+        ):
+            ratio = 1.0 / detected_divisors[0]
+            status = "scaled-replica"
+        elif detected_divisors:
+            ratio = float(np.median([1.0 / item for item in detected_divisors]))
+            status = "ambiguous"
+        else:
+            ratio = 1.0
+            status = "same-scale"
+
+        return ComponentScaleDiagnostics(
+            label=label,
+            cells=cells,
+            axes_tested=axes_tested,
+            expected_scores=tuple(expected_scores),
+            subgrid_scores=tuple(subgrid_scores),
+            subgrid_divisors=tuple(subgrid_divisors),
+            estimated_scale_ratio=ratio,
+            status=status,
+        )
+
+    def _local_subgrid_votes(
+        self,
+        image_rgb: UInt8Image,
+        bounds: Rect,
+        topology: NDArray[np.bool_],
+        *,
+        pitch_x: float,
+        pitch_y: float,
+    ) -> tuple[NDArray[np.uint8], NDArray[np.bool_]]:
+        """Detect embedded scaled-grid regions with overlapping local windows.
+
+        Connected-component selection alone cannot separate two boards when
+        their projected logical cells touch. Each active cell therefore votes
+        through a small neighborhood. A neighborhood is considered scaled only
+        when both pixel axes agree on the same P/2 or P/3 divisor.
+
+        Overlapping windows provide spatial consensus: isolated false harmonic
+        responses from tile artwork receive too few votes, while a real
+        miniature grid produces repeated votes across neighboring cells.
+        """
+        rows, cols = topology.shape
+        votes = np.zeros((rows, cols), dtype=np.uint8)
+        opportunities = np.zeros((rows, cols), dtype=np.uint8)
+        radius = self.config.local_scale_window_radius
+
+        for row in range(rows):
+            for col in range(cols):
+                if not bool(topology[row, col]):
+                    continue
+
+                r0 = max(0, row - radius)
+                r1 = min(rows, row + radius + 1)
+                c0 = max(0, col - radius)
+                c1 = min(cols, col + radius + 1)
+                window_topology = topology[r0:r1, c0:c1]
+                active_cells = int(np.count_nonzero(window_topology))
+                if active_cells < self.config.local_scale_min_active_cells:
+                    continue
+
+                x0 = bounds.x + int(round(c0 * pitch_x))
+                x1 = bounds.x + int(round(c1 * pitch_x))
+                y0 = bounds.y + int(round(r0 * pitch_y))
+                y1 = bounds.y + int(round(r1 * pitch_y))
+                crop = image_rgb[y0:y1, x0:x1]
+                if crop.size == 0:
+                    continue
+
+                gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY).astype(np.float32)
+                detected_divisors: list[int] = []
+
+                for axis, expected_pitch in ((1, pitch_x), (0, pitch_y)):
+                    derivative = np.abs(np.diff(gray, axis=axis))
+                    profile = derivative.mean(axis=1 - axis).astype(np.float32)
+                    profile -= profile.mean()
+
+                    expected_score = self._autocorrelation_at(
+                        profile,
+                        max(1, int(round(expected_pitch))),
+                        tolerance=self.config.secondary_component_subgrid_lag_tolerance_px,
+                    )
+
+                    best_score = float("-inf")
+                    best_divisor: int | None = None
+                    for divisor in self.config.secondary_component_subgrid_divisors:
+                        score = self._autocorrelation_at(
+                            profile,
+                            max(1, int(round(expected_pitch / divisor))),
+                            tolerance=self.config.secondary_component_subgrid_lag_tolerance_px,
+                        )
+                        if score > best_score:
+                            best_score = score
+                            best_divisor = divisor
+
+                    if (
+                        best_divisor is not None
+                        and np.isfinite(best_score)
+                        and best_score >= self.config.secondary_component_subgrid_min_score
+                        and best_score
+                        >= expected_score
+                        * self.config.secondary_component_subgrid_relative_score
+                    ):
+                        detected_divisors.append(best_divisor)
+
+                scaled_window = (
+                    len(detected_divisors) == 2
+                    and len(set(detected_divisors)) == 1
+                )
+
+                for rr in range(r0, r1):
+                    for cc in range(c0, c1):
+                        if not bool(topology[rr, cc]):
+                            continue
+                        opportunities[rr, cc] = min(
+                            255,
+                            int(opportunities[rr, cc]) + 1,
+                        )
+                        if scaled_window:
+                            votes[rr, cc] = min(255, int(votes[rr, cc]) + 1)
+
+        required = np.maximum(
+            self.config.local_scale_min_votes,
+            np.ceil(
+                opportunities.astype(np.float32)
+                * self.config.local_scale_vote_ratio
+            ).astype(np.uint8),
+        )
+        seeds = (
+            topology
+            & (opportunities > 0)
+            & (votes >= required)
+        )
+
+        # Strict consensus identifies reliable seed cells, but edge cells of a
+        # miniature board naturally receive fewer overlapping windows. Expand
+        # each seeded region through contiguous cells that received any local
+        # sub-grid evidence, provided a meaningful fraction of that support
+        # component is made of strict seeds. This completes the mini-board
+        # boundary without dilating blindly into zero-vote player cells.
+        support = (
+            topology
+            & (votes >= self.config.local_scale_expand_min_vote)
+        )
+        count, support_labels = cv2.connectedComponents(
+            support.astype(np.uint8),
+            connectivity=4,
+        )
+        scaled = seeds.copy()
+        for label in range(1, count):
+            component = support_labels == label
+            component_size = int(np.count_nonzero(component))
+            if component_size == 0:
+                continue
+            seed_count = int(np.count_nonzero(seeds & component))
+            if (
+                seed_count > 0
+                and seed_count / component_size
+                >= self.config.local_scale_expand_min_seed_fraction
+            ):
+                scaled |= component
+
+        return votes, scaled.astype(np.bool_)
+
     def _select_primary_topology(
         self,
         topology: NDArray[np.bool_],
         occupancy: NDArray[np.float32],
+        *,
+        image_rgb: UInt8Image | None = None,
+        bounds: Rect | None = None,
+        pitch_x: float | None = None,
+        pitch_y: float | None = None,
+        preferred_board_point: Point | None = None,
     ) -> tuple[
         NDArray[np.int32],
         tuple[int, ...],
         tuple[float, ...],
         tuple[float, ...],
+        tuple[ComponentScaleDiagnostics, ...],
+        NDArray[np.uint8],
+        NDArray[np.bool_],
         NDArray[np.bool_],
     ]:
-        """Separate true board islands from a scaled opponent-board replica.
+        """Separate player-board islands from scaled opponent-board replicas.
 
-        Size alone is not sufficient: some real levels contain tiny detached
-        islands, even a single playable cell. The useful distinction is scale.
-
-        A genuine island is rendered at the same cell pitch as the main board,
-        so its corner-based board evidence is usually very strong. A miniature
-        opponent board is sampled on the player's much larger grid and therefore
-        tends to produce weaker, mixed evidence.
-
-        Keep a component when any of these independent signals says it looks
-        like same-scale player-board geometry:
-        - its size is comparable to the largest component;
-        - its mean corner evidence is high; or
-        - most of its cells are individually strong, even if one blocker-covered
-          cell drags the arithmetic mean down.
-
-        The strong-cell fraction is intentionally robust to one or two weak
-        cells inside a legitimate small island. A miniature opponent board,
-        sampled at the player's larger pitch, tends to have many mixed/weak
-        projected cells rather than a high fraction of individually strong ones.
+        Large/comparable components remain safe to keep. Secondary components
+        with enough pixels are additionally checked for harmonic sub-grid
+        structure. A confirmed P/2 or P/3 grid is rejected even when occupancy
+        is high; ambiguous scale evidence is retained and surfaced to callers
+        so a future match-level UI can request one human choice.
         """
         count, labels = cv2.connectedComponents(
             topology.astype(np.uint8),
             connectivity=4,
         )
         if count <= 1:
-            return labels.astype(np.int32), (), (), (), topology.copy()
+            return (
+                labels.astype(np.int32),
+                (),
+                (),
+                (),
+                (),
+                np.zeros(topology.shape, dtype=np.uint8),
+                np.zeros(topology.shape, dtype=np.bool_),
+                topology.copy(),
+            )
 
         sizes = tuple(
             int(np.count_nonzero(labels == label))
@@ -622,27 +1103,148 @@ class BoardDetector:
             for label in range(1, count)
         )
         if not sizes:
-            return labels.astype(np.int32), (), (), (), topology.copy()
+            return (
+                labels.astype(np.int32),
+                (),
+                (),
+                (),
+                (),
+                np.zeros(topology.shape, dtype=np.uint8),
+                np.zeros(topology.shape, dtype=np.bool_),
+                topology.copy(),
+            )
 
         largest = max(sizes)
-        keep_labels = {
-            label
-            for label, (size, mean_evidence, strong_fraction) in enumerate(
-                zip(sizes, means, strong_fractions),
-                start=1,
-            )
+        largest_label = 1 + sizes.index(largest)
+        primary_label = largest_label
+        human_anchor_active = False
+
+        if (
+            preferred_board_point is not None
+            and bounds is not None
+            and pitch_x is not None
+            and pitch_y is not None
+            and bounds.x <= preferred_board_point.x < bounds.right
+            and bounds.y <= preferred_board_point.y < bounds.bottom
+        ):
+            anchor_col = int((preferred_board_point.x - bounds.x) / pitch_x)
+            anchor_row = int((preferred_board_point.y - bounds.y) / pitch_y)
             if (
-                size >= largest * self.config.secondary_component_keep_ratio
-                or mean_evidence >= self.config.secondary_component_min_mean_evidence
-                or strong_fraction >= self.config.secondary_component_min_strong_fraction
+                0 <= anchor_row < labels.shape[0]
+                and 0 <= anchor_col < labels.shape[1]
+            ):
+                anchor_label = int(labels[anchor_row, anchor_col])
+                if anchor_label > 0:
+                    primary_label = anchor_label
+                    human_anchor_active = True
+
+        scale_diagnostics: list[ComponentScaleDiagnostics] = []
+        keep_labels: set[int] = set()
+
+        for label, (size, mean_evidence, strong_fraction) in enumerate(
+            zip(sizes, means, strong_fractions),
+            start=1,
+        ):
+            comparable_size = (
+                not human_anchor_active
+                and size >= largest * self.config.secondary_component_keep_ratio
             )
-        }
+            visual_support = (
+                mean_evidence >= self.config.secondary_component_min_mean_evidence
+                or strong_fraction
+                >= self.config.secondary_component_min_strong_fraction
+            )
+
+            if (
+                image_rgb is not None
+                and bounds is not None
+                and pitch_x is not None
+                and pitch_y is not None
+                and label != primary_label
+                and not comparable_size
+            ):
+                scale = self._component_scale_diagnostics(
+                    image_rgb,
+                    bounds,
+                    labels.astype(np.int32),
+                    label,
+                    pitch_x=pitch_x,
+                    pitch_y=pitch_y,
+                    cells=size,
+                )
+            else:
+                scale = ComponentScaleDiagnostics(
+                    label=label,
+                    cells=size,
+                    axes_tested=0,
+                    expected_scores=(),
+                    subgrid_scores=(),
+                    subgrid_divisors=(),
+                    estimated_scale_ratio=1.0 if label == primary_label else None,
+                    status=(
+                        "primary"
+                        if label == primary_label
+                        else "comparable-size"
+                        if comparable_size
+                        else "not-tested"
+                    ),
+                )
+
+            scale_diagnostics.append(scale)
+
+            if label == primary_label or comparable_size:
+                keep_labels.add(label)
+                continue
+            if scale.status == "scaled-replica":
+                continue
+            if human_anchor_active and scale.status == "ambiguous":
+                continue
+            if visual_support:
+                keep_labels.add(label)
+
         selected = np.isin(labels, tuple(keep_labels))
+
+        local_subgrid_votes = np.zeros(topology.shape, dtype=np.uint8)
+        local_subgrid_topology = np.zeros(topology.shape, dtype=np.bool_)
+        if (
+            image_rgb is not None
+            and bounds is not None
+            and pitch_x is not None
+            and pitch_y is not None
+        ):
+            local_subgrid_votes, local_subgrid_topology = self._local_subgrid_votes(
+                image_rgb,
+                bounds,
+                selected.astype(np.bool_),
+                pitch_x=pitch_x,
+                pitch_y=pitch_y,
+            )
+
+            if preferred_board_point is not None:
+                anchor_col = int((preferred_board_point.x - bounds.x) / pitch_x)
+                anchor_row = int((preferred_board_point.y - bounds.y) / pitch_y)
+                if (
+                    0 <= anchor_row < topology.shape[0]
+                    and 0 <= anchor_col < topology.shape[1]
+                ):
+                    # Never erase the human-selected region. The local scale map
+                    # is a rejection cue only for spatially separate candidates.
+                    anchor_mask = np.zeros(topology.shape, dtype=np.uint8)
+                    anchor_mask[anchor_row, anchor_col] = 1
+                    kernel = np.ones((3, 3), dtype=np.uint8)
+                    protected = cv2.dilate(anchor_mask, kernel, iterations=1) > 0
+                    local_subgrid_topology &= ~protected
+
+            selected &= ~local_subgrid_topology
+
         return (
             labels.astype(np.int32),
             sizes,
             means,
             strong_fractions,
+            tuple(scale_diagnostics),
+            local_subgrid_votes,
+            local_subgrid_topology,
             selected.astype(np.bool_),
         )
 

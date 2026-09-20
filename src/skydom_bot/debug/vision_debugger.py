@@ -18,7 +18,7 @@ from numpy.typing import NDArray
 from skydom_bot.capture import capture_screen
 from skydom_bot.debug.overlay import draw_board_overlay
 from skydom_bot.debug.report import format_geometry_summary, save_board_overlay
-from skydom_bot.domain.board import BoardGeometry
+from skydom_bot.domain.board import BoardGeometry, Point
 from skydom_bot.vision.board_detector import (
     BoardDetectionDiagnostics,
     BoardDetector,
@@ -155,7 +155,7 @@ def _render_autocorrelation(
     left.axvline(pitch.selected_pitch, linewidth=2)
     left.set_title(
         f"{title}: normalized autocorrelation\n"
-        f"selected fundamental pitch = {pitch.selected_pitch:.0f}px"
+        f"axis-local selected pitch = {pitch.selected_pitch:.0f}px"
     )
     left.set_xlabel("lag / displacement (px)")
     left.set_ylabel("similarity")
@@ -297,32 +297,58 @@ def _render_component_selection(left: Axes, right: Axes, ctx: DebugContext) -> N
     sizes = ctx.diagnostics.topology_component_sizes
     means = ctx.diagnostics.topology_component_mean_evidence
     strong_fractions = ctx.diagnostics.topology_component_strong_fraction
+    scale = ctx.diagnostics.topology_component_scale
+    ambiguous = set(ctx.diagnostics.ambiguous_topology_components)
+    local_votes = ctx.diagnostics.local_subgrid_votes
+    local_scaled = ctx.diagnostics.local_subgrid_topology
 
-    left.imshow(labels)
-    stat_lines = [
-        f"{index}: n={size}, mean={mean:.2f}, strong={strong:.0%}"
-        for index, (size, mean, strong) in enumerate(
-            zip(sizes, means, strong_fractions),
-            start=1,
+    left.imshow(local_votes, vmin=0)
+    stat_lines = []
+    for index, (size, mean, strong) in enumerate(
+        zip(sizes, means, strong_fractions),
+        start=1,
+    ):
+        scale_info = scale[index - 1] if index - 1 < len(scale) else None
+        if scale_info is None:
+            scale_text = "scale=n/a"
+        elif scale_info.estimated_scale_ratio is None:
+            scale_text = f"scale={scale_info.status}"
+        else:
+            scale_text = (
+                f"scale={scale_info.estimated_scale_ratio:.2f} "
+                f"({scale_info.status})"
+            )
+        stat_lines.append(
+            f"{index}: n={size}, mean={mean:.2f}, strong={strong:.0%}, {scale_text}"
         )
-    ]
-    stats = "\n".join(
-        "   ".join(stat_lines[index : index + 3])
-        for index in range(0, len(stat_lines), 3)
-    ) or "single component"
+
+    stats = "\n".join(stat_lines) or "single component"
+    if ambiguous:
+        stats += (
+            "\nHuman-review candidate: component(s) "
+            + ", ".join(str(label) for label in sorted(ambiguous))
+        )
+
+    local_count = int(np.count_nonzero(local_scaled))
     left.set_title(
-        "4-connected topology components before board selection\n"
-        f"{stats}"
+        "Local sub-grid votes inside logical topology\n"
+        f"scaled cells={local_count}; {stats}"
     )
     left.set_xlabel("column")
     left.set_ylabel("row")
     for row in range(labels.shape[0]):
         for col in range(labels.shape[1]):
             label = int(labels[row, col])
+            if label == 0:
+                symbol = "."
+            elif bool(local_scaled[row, col]):
+                symbol = f"S{int(local_votes[row, col])}"
+            else:
+                symbol = str(int(local_votes[row, col]))
             left.text(
                 col,
                 row,
-                "." if label == 0 else str(label),
+                symbol,
                 ha="center",
                 va="center",
                 fontsize=8,
@@ -331,7 +357,7 @@ def _render_component_selection(left: Axes, right: Axes, ctx: DebugContext) -> N
     right.imshow(selected, cmap="gray", vmin=0, vmax=1)
     right.set_title(
         "Retained player-board topology before normalization\n"
-        "keep comparable components, high-mean islands, or islands with mostly strong cells"
+        "component-scale and embedded local P/2/P/3 regions are rejected"
     )
     right.set_xlabel("column")
     right.set_ylabel("row")
@@ -359,7 +385,8 @@ def _render_final(left: Axes, right: Axes, ctx: DebugContext) -> None:
         (
             f"Board: {ctx.geometry.rows}x{ctx.geometry.cols}\n"
             f"Active cells: {len(ctx.geometry.cells)}\n"
-            f"Pitch: {ctx.geometry.pitch_x:.2f} x {ctx.geometry.pitch_y:.2f}\n\n"
+            f"Pitch: {ctx.geometry.pitch_x:.2f} x {ctx.geometry.pitch_y:.2f}\n"
+            f"Shared pitch candidate: {ctx.diagnostics.shared_pitch:.2f}\n\n"
             f"{ctx.geometry.topology_text(active='X', empty='.')}"
         ),
         va="top",
@@ -400,7 +427,7 @@ def _steps() -> tuple[DebugStep, ...]:
         ),
         DebugStep(
             "6. X autocorrelation",
-            "The 1D signal is compared with shifted copies of itself. Strong similarity at ~one cell width reveals the grid period; larger multiples are harmonics.",
+            "The 1D signal is compared with shifted copies of itself. Each axis exposes its local candidates; the detector later selects one shared square-grid pitch using support from both axes and harmonic consistency.",
             _render_autocorrelation_x,
         ),
         DebugStep(
@@ -410,7 +437,7 @@ def _steps() -> tuple[DebugStep, ...]:
         ),
         DebugStep(
             "8. Y autocorrelation",
-            "Strong local peaks are inspected and the smallest strong peak is chosen as the fundamental period.",
+            "Strong local peaks are inspected on Y as well. The final pitch is chosen jointly from X and Y rather than trusting the smallest peak from either axis alone.",
             _render_autocorrelation_y,
         ),
         DebugStep(
@@ -430,7 +457,7 @@ def _steps() -> tuple[DebugStep, ...]:
         ),
         DebugStep(
             "12. Board component selection",
-            "A screen may contain another Match-3 board, such as an opponent preview. The reconciled logical grid is split into 4-connected components; small disconnected replicas are rejected while comparable islands are preserved.",
+            "A screen may contain another Match-3 board, such as an opponent preview. Scale is checked both per component and in overlapping local neighborhoods, so a miniature P/2 or P/3 grid can be removed even when it becomes 4-connected to the player board. S-prefixed cells are locally classified as scaled.",
             _render_component_selection,
         ),
         DebugStep(
@@ -541,6 +568,17 @@ def _save_steps(context: DebugContext, directory: Path) -> None:
         plt.close(figure)
 
 
+def _parse_point(value: str) -> Point:
+    """Parse an absolute screen point as X,Y."""
+    try:
+        x_text, y_text = value.split(",", maxsplit=1)
+        return Point(int(x_text.strip()), int(y_text.strip()))
+    except (TypeError, ValueError) as exc:
+        raise argparse.ArgumentTypeError(
+            "Expected --board-point as X,Y, for example 700,320."
+        ) from exc
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build CLI arguments for the visual debugger."""
     parser = argparse.ArgumentParser(description="Visualize each stage of Skydom board detection.")
@@ -563,6 +601,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--board-point",
+        type=_parse_point,
+        help=(
+            "Optional human fallback anchor as absolute screen X,Y. "
+            "Secondary ambiguous components are rejected relative to this board."
+        ),
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         default=Path("artifacts/board-overlay.png"),
@@ -582,7 +628,10 @@ def main() -> int:
     image = _read_rgb(args.image) if args.image else capture_screen(args.monitor)
 
     detector = BoardDetector()
-    geometry, diagnostics = detector.detect_with_diagnostics(image)
+    geometry, diagnostics = detector.detect_with_diagnostics(
+        image,
+        preferred_board_point=args.board_point,
+    )
     context = DebugContext(
         image_rgb=image,
         geometry=geometry,
@@ -595,6 +644,19 @@ def main() -> int:
     )
 
     print(format_geometry_summary(geometry))
+    if diagnostics.ambiguous_topology_components:
+        labels = ", ".join(
+            str(label) for label in diagnostics.ambiguous_topology_components
+        )
+        print(
+            "Ambiguous board-scale component(s): "
+            f"{labels}. Human startup selection is recommended if the "
+            "automatic overlay is incorrect."
+        )
+        print(
+            "Re-run with --board-point X,Y using a point inside the player's "
+            "board to resolve the ambiguity."
+        )
     print(f"Overlay: {save_board_overlay(image, geometry, args.output)}")
 
     if args.save_steps:

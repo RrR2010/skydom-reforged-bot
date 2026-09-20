@@ -5,8 +5,8 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from skydom_bot.domain.board import Rect
-from skydom_bot.vision.board_detector import BoardDetector
+from skydom_bot.domain.board import Point, Rect
+from skydom_bot.vision.board_detector import BoardDetector, PitchDiagnostics
 
 
 def _synthetic_board(rows: int = 8, cols: int = 7, pitch: int = 60) -> np.ndarray:
@@ -156,7 +156,7 @@ def test_secondary_mini_board_is_rejected_and_primary_grid_is_normalized() -> No
     occupancy[4:8, 0:2] = 0.45
     occupancy[8, 1:4] = 0.45
 
-    labels, sizes, means, strong_fractions, selected = detector._select_primary_topology(
+    labels, sizes, means, strong_fractions, scale, local_votes, local_scaled, selected = detector._select_primary_topology(
         topology,
         occupancy,
     )
@@ -230,7 +230,7 @@ def test_small_high_evidence_island_is_preserved() -> None:
     occupancy = np.zeros((7, 9), dtype=np.float32)
     occupancy[topology] = 0.96
 
-    labels, sizes, means, strong_fractions, selected = detector._select_primary_topology(
+    labels, sizes, means, strong_fractions, scale, local_votes, local_scaled, selected = detector._select_primary_topology(
         topology,
         occupancy,
     )
@@ -300,7 +300,7 @@ def test_small_island_with_one_weak_blocked_cell_is_preserved() -> None:
     # four of five cells remain individually strong.
     occupancy[4, 1] = 0.18
 
-    labels, sizes, means, strong_fractions, selected = detector._select_primary_topology(
+    labels, sizes, means, strong_fractions, scale, local_votes, local_scaled, selected = detector._select_primary_topology(
         topology,
         occupancy,
     )
@@ -310,3 +310,385 @@ def test_small_island_with_one_weak_blocked_cell_is_preserved() -> None:
     assert strong_fractions[small_label - 1] >= 0.60
     assert bool(selected[4, 1])
     assert bool(selected[6, 1])
+
+
+
+def _draw_grid_region(
+    image: np.ndarray,
+    *,
+    x0: int,
+    y0: int,
+    width: int,
+    height: int,
+    pitch: int,
+) -> None:
+    """Draw repeated high-contrast grid boundaries for scale tests."""
+    image[y0 : y0 + height, x0 : x0 + width] = (48, 52, 125)
+    for x in range(x0, x0 + width + 1, pitch):
+        cv2.line(image, (x, y0), (x, y0 + height - 1), (230, 230, 230), 2)
+    for y in range(y0, y0 + height + 1, pitch):
+        cv2.line(image, (x0, y), (x0 + width - 1, y), (230, 230, 230), 2)
+
+
+def test_high_evidence_half_scale_opponent_grid_is_rejected() -> None:
+    detector = BoardDetector()
+    pitch = 60
+    rows, cols = 9, 14
+    bounds = Rect(0, 0, cols * pitch, rows * pitch)
+    image = np.full((bounds.height, bounds.width, 3), 225, dtype=np.uint8)
+
+    topology = np.zeros((rows, cols), dtype=np.bool_)
+    topology[:, 5:14] = True
+    topology[4:8, 0:4] = True
+
+    occupancy = np.zeros((rows, cols), dtype=np.float32)
+    occupancy[topology] = 0.95
+
+    # The player board repeats at the expected 60 px pitch.
+    _draw_grid_region(
+        image,
+        x0=5 * pitch,
+        y0=0,
+        width=9 * pitch,
+        height=9 * pitch,
+        pitch=pitch,
+    )
+
+    # The opponent preview occupies four projected player cells but internally
+    # repeats every 30 px. Its occupancy is deliberately high, reproducing the
+    # aliasing case that defeated the old strong-fraction heuristic.
+    _draw_grid_region(
+        image,
+        x0=0,
+        y0=4 * pitch,
+        width=4 * pitch,
+        height=4 * pitch,
+        pitch=pitch // 2,
+    )
+
+    _, sizes, _, strong_fractions, scale, local_votes, local_scaled, selected = detector._select_primary_topology(
+        topology,
+        occupancy,
+        image_rgb=image,
+        bounds=bounds,
+        pitch_x=float(pitch),
+        pitch_y=float(pitch),
+    )
+
+    mini_label = 1 + sizes.index(16)
+    mini_scale = scale[mini_label - 1]
+
+    assert strong_fractions[mini_label - 1] == 1.0
+    assert mini_scale.status == "scaled-replica"
+    assert mini_scale.estimated_scale_ratio == 0.5
+    assert not bool(selected[5, 1])
+    assert bool(selected[5, 6])
+
+
+def test_one_axis_scale_conflict_is_ambiguous_and_kept() -> None:
+    detector = BoardDetector()
+    pitch = 60
+    bounds = Rect(0, 0, 9 * pitch, 7 * pitch)
+    image = np.full((bounds.height, bounds.width, 3), 225, dtype=np.uint8)
+
+    topology = np.zeros((7, 9), dtype=np.bool_)
+    topology[2:7, 3:8] = True
+    topology[0:4, 0:2] = True
+
+    occupancy = np.zeros((7, 9), dtype=np.float32)
+    occupancy[topology] = 0.95
+
+    # Only the vertical direction contains a half-pitch pattern. The horizontal
+    # span is too narrow to prove scale independently, so the component must be
+    # surfaced as ambiguous rather than rejected.
+    _draw_grid_region(
+        image,
+        x0=0,
+        y0=0,
+        width=2 * pitch,
+        height=4 * pitch,
+        pitch=pitch // 2,
+    )
+    _, sizes, _, _, scale, local_votes, local_scaled, selected = detector._select_primary_topology(
+        topology,
+        occupancy,
+        image_rgb=image,
+        bounds=bounds,
+        pitch_x=float(pitch),
+        pitch_y=float(pitch),
+    )
+
+    small_label = 1 + sizes.index(8)
+    small_scale = scale[small_label - 1]
+
+    assert small_scale.status in {"ambiguous", "insufficient-evidence"}
+    assert bool(selected[1, 0])
+
+
+
+def test_human_anchor_rejects_ambiguous_secondary_grid_for_match_fallback() -> None:
+    detector = BoardDetector()
+    pitch = 60
+    rows, cols = 9, 14
+    bounds = Rect(0, 0, cols * pitch, rows * pitch)
+    image = np.full((bounds.height, bounds.width, 3), 225, dtype=np.uint8)
+
+    topology = np.zeros((rows, cols), dtype=np.bool_)
+    topology[:, 5:14] = True
+    topology[4:8, 0:4] = True
+
+    occupancy = np.zeros((rows, cols), dtype=np.float32)
+    occupancy[topology] = 0.95
+
+    _draw_grid_region(
+        image,
+        x0=5 * pitch,
+        y0=0,
+        width=9 * pitch,
+        height=9 * pitch,
+        pitch=pitch,
+    )
+
+    # Secondary region: half-pitch vertically aligned grid lines on X, but
+    # normal player-pitch horizontal lines on Y. Automatic evidence therefore
+    # conflicts across axes and must remain conservative.
+    x0, y0 = 0, 4 * pitch
+    width = height = 4 * pitch
+    image[y0 : y0 + height, x0 : x0 + width] = (48, 52, 125)
+    for x in range(x0, x0 + width + 1, pitch // 2):
+        cv2.line(image, (x, y0), (x, y0 + height - 1), (230, 230, 230), 2)
+    for y in range(y0, y0 + height + 1, pitch):
+        cv2.line(image, (x0, y), (x0 + width - 1, y), (230, 230, 230), 2)
+
+    _, sizes, _, _, auto_scale, auto_votes, auto_local_scaled, auto_selected = detector._select_primary_topology(
+        topology,
+        occupancy,
+        image_rgb=image,
+        bounds=bounds,
+        pitch_x=float(pitch),
+        pitch_y=float(pitch),
+    )
+    mini_label = 1 + sizes.index(16)
+
+    assert auto_scale[mini_label - 1].status == "ambiguous"
+    assert bool(auto_selected[5, 1])
+
+    _, _, _, _, manual_scale, manual_votes, manual_local_scaled, manual_selected = detector._select_primary_topology(
+        topology,
+        occupancy,
+        image_rgb=image,
+        bounds=bounds,
+        pitch_x=float(pitch),
+        pitch_y=float(pitch),
+        preferred_board_point=Point(6 * pitch + 10, pitch + 10),
+    )
+
+    assert manual_scale[mini_label - 1].status == "ambiguous"
+    assert not bool(manual_selected[5, 1])
+    assert bool(manual_selected[5, 6])
+
+
+
+def test_connected_half_scale_region_is_removed_by_local_scale_voting() -> None:
+    detector = BoardDetector()
+    pitch = 60
+    rows, cols = 9, 14
+    bounds = Rect(0, 0, cols * pitch, rows * pitch)
+    image = np.full((bounds.height, bounds.width, 3), 225, dtype=np.uint8)
+
+    # Reproduce the real failure mode: the projected mini-board touches the
+    # player board, so connected-component analysis sees one single component.
+    topology = np.zeros((rows, cols), dtype=np.bool_)
+    topology[:, 5:14] = True
+    topology[5:9, 0:5] = True
+
+    occupancy = np.zeros((rows, cols), dtype=np.float32)
+    occupancy[topology] = 0.95
+
+    _draw_grid_region(
+        image,
+        x0=5 * pitch,
+        y0=0,
+        width=9 * pitch,
+        height=9 * pitch,
+        pitch=pitch,
+    )
+    _draw_grid_region(
+        image,
+        x0=0,
+        y0=5 * pitch,
+        width=5 * pitch,
+        height=4 * pitch,
+        pitch=pitch // 2,
+    )
+
+    (
+        labels,
+        sizes,
+        _,
+        _,
+        _,
+        local_votes,
+        local_scaled,
+        selected,
+    ) = detector._select_primary_topology(
+        topology,
+        occupancy,
+        image_rgb=image,
+        bounds=bounds,
+        pitch_x=float(pitch),
+        pitch_y=float(pitch),
+    )
+
+    assert len(sizes) == 1
+    assert sizes[0] == int(np.count_nonzero(topology))
+    assert int(labels[6, 2]) == int(labels[6, 6]) == 1
+    assert int(local_votes[6, 2]) >= detector.config.local_scale_min_votes
+    assert bool(local_scaled[6, 2])
+    assert not bool(selected[6, 2])
+    assert bool(selected[6, 6])
+
+
+
+def test_local_subgrid_seed_expands_through_low_vote_boundary_cells() -> None:
+    detector = BoardDetector()
+
+    topology = np.ones((4, 6), dtype=np.bool_)
+    votes = np.array(
+        [
+            [4, 4, 2, 2, 0, 0],
+            [6, 6, 3, 3, 0, 0],
+            [5, 5, 3, 3, 0, 0],
+            [3, 3, 2, 0, 0, 0],
+        ],
+        dtype=np.uint8,
+    )
+    opportunities = np.full_like(votes, 6, dtype=np.uint8)
+    required = np.maximum(
+        detector.config.local_scale_min_votes,
+        np.ceil(
+            opportunities.astype(np.float32)
+            * detector.config.local_scale_vote_ratio
+        ).astype(np.uint8),
+    )
+    seeds = topology & (votes >= required)
+    support = topology & (
+        votes >= detector.config.local_scale_expand_min_vote
+    )
+
+    count, labels = cv2.connectedComponents(
+        support.astype(np.uint8),
+        connectivity=4,
+    )
+    scaled = seeds.copy()
+    for label in range(1, count):
+        component = labels == label
+        size = int(np.count_nonzero(component))
+        seed_count = int(np.count_nonzero(seeds & component))
+        if (
+            seed_count > 0
+            and seed_count / size
+            >= detector.config.local_scale_expand_min_seed_fraction
+        ):
+            scaled |= component
+
+    assert bool(scaled[0, 2])
+    assert bool(scaled[2, 3])
+    assert not bool(scaled[0, 4])
+    assert not bool(scaled[3, 3])
+
+
+
+def _pitch_diag(axis: str, peaks: tuple[int, ...], values: dict[int, float]):
+    size = max(values) + 2
+    scores = np.full(size, np.nan, dtype=np.float64)
+    profile = np.zeros(size + 160, dtype=np.float32)
+    for lag, value in values.items():
+        scores[lag] = value
+    return PitchDiagnostics(
+        axis=axis,
+        edge_energy=np.zeros((1, 1), dtype=np.float32),
+        profile=profile,
+        lags=np.arange(len(scores), dtype=np.int32),
+        scores=scores,
+        peaks=peaks,
+        selected_pitch=float(min(peaks)),
+    )
+
+
+def test_shared_pitch_rejects_one_axis_alias_and_uses_cross_axis_support() -> None:
+    detector = BoardDetector()
+
+    x = _pitch_diag(
+        "x",
+        (58, 65, 130),
+        {58: 0.33, 65: 0.44, 130: 0.35},
+    )
+    y = _pitch_diag(
+        "y",
+        (65, 131),
+        {58: 0.25, 65: 0.40, 130: 0.46, 131: 0.47},
+    )
+
+    # Populate profiles so _autocorrelation_at has deterministic synthetic
+    # periodic support at the intended lags.
+    rng = np.random.default_rng(42)
+    base = rng.normal(size=420).astype(np.float32)
+    for diag, period in ((x, 65), (y, 65)):
+        pattern = np.resize(base[:period], diag.profile.shape)
+        diag.profile[:] = pattern
+
+    assert detector._shared_pitch(x, y) == 65.0
+
+
+def test_shared_pitch_prefers_fundamental_when_double_harmonic_is_supported() -> None:
+    detector = BoardDetector()
+
+    x = _pitch_diag("x", (60, 120), {60: 0.42, 120: 0.48})
+    y = _pitch_diag("y", (60, 120), {60: 0.40, 120: 0.46})
+
+    rng = np.random.default_rng(7)
+    period = 60
+    pattern = rng.normal(size=period).astype(np.float32)
+    x.profile[:] = np.resize(pattern, x.profile.shape)
+    y.profile[:] = np.resize(pattern, y.profile.shape)
+
+    assert detector._shared_pitch(x, y) == 60.0
+
+
+
+def test_sparse_board_group_can_be_selected_by_spatial_footprint() -> None:
+    detector = BoardDetector()
+    image = np.full((900, 1600, 3), 225, dtype=np.uint8)
+    board_color = (52, 55, 133)
+
+    # Nine small islands are close enough to be grouped. Their combined masked
+    # area stays below the dense-component threshold, while the group footprint
+    # is large enough to describe a plausible sparse playfield.
+    size = 45
+    gap = 55
+    step = size + gap
+    for row in range(3):
+        for col in range(3):
+            x = 420 + col * step
+            y = 180 + row * step
+            cv2.rectangle(
+                image,
+                (x, y),
+                (x + size - 1, y + size - 1),
+                board_color,
+                -1,
+            )
+
+    mask = detector._board_background_mask(image)
+    bounds, component = detector._board_component(mask)
+
+    image_area = image.shape[0] * image.shape[1]
+    masked_area = int(np.count_nonzero(component))
+
+    assert masked_area < image_area * detector.config.min_component_area_ratio
+    assert bounds.width * bounds.height >= (
+        image_area * detector.config.min_component_footprint_ratio
+    )
+    assert bounds.width >= 240
+    assert bounds.height >= 240
