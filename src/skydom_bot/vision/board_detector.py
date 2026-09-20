@@ -51,6 +51,7 @@ class BoardDetectorConfig:
     center_tile_evidence_threshold: float = 0.45
     secondary_component_keep_ratio: float = 0.35
     secondary_component_min_mean_evidence: float = 0.80
+    secondary_component_min_strong_fraction: float = 0.60
     cell_corner_ratio: float = 0.16
 
 
@@ -88,6 +89,7 @@ class BoardDetectionDiagnostics:
     topology_components: NDArray[np.int32]
     topology_component_sizes: tuple[int, ...]
     topology_component_mean_evidence: tuple[float, ...]
+    topology_component_strong_fraction: tuple[float, ...]
     selected_topology: NDArray[np.bool_]
 
 
@@ -153,6 +155,7 @@ class BoardDetector:
             topology_components,
             component_sizes,
             component_mean_evidence,
+            component_strong_fraction,
             selected_topology,
         ) = self._select_primary_topology(reconciled_topology, occupancy)
 
@@ -207,6 +210,7 @@ class BoardDetector:
             topology_components=topology_components,
             topology_component_sizes=component_sizes,
             topology_component_mean_evidence=component_mean_evidence,
+            topology_component_strong_fraction=component_strong_fraction,
             selected_topology=selected_topology,
         )
         return geometry, diagnostics
@@ -565,6 +569,7 @@ class BoardDetector:
         NDArray[np.int32],
         tuple[int, ...],
         tuple[float, ...],
+        tuple[float, ...],
         NDArray[np.bool_],
     ]:
         """Separate true board islands from a scaled opponent-board replica.
@@ -577,19 +582,24 @@ class BoardDetector:
         opponent board is sampled on the player's much larger grid and therefore
         tends to produce weaker, mixed evidence.
 
-        Keep a component when either:
-        - its size is comparable to the largest component; or
-        - its mean visual evidence is strong enough to look like same-scale
-          player-board cells.
+        Keep a component when any of these independent signals says it looks
+        like same-scale player-board geometry:
+        - its size is comparable to the largest component;
+        - its mean corner evidence is high; or
+        - most of its cells are individually strong, even if one blocker-covered
+          cell drags the arithmetic mean down.
 
-        This retains small legitimate islands without re-admitting the mini-board.
+        The strong-cell fraction is intentionally robust to one or two weak
+        cells inside a legitimate small island. A miniature opponent board,
+        sampled at the player's larger pitch, tends to have many mixed/weak
+        projected cells rather than a high fraction of individually strong ones.
         """
         count, labels = cv2.connectedComponents(
             topology.astype(np.uint8),
             connectivity=4,
         )
         if count <= 1:
-            return labels.astype(np.int32), (), (), topology.copy()
+            return labels.astype(np.int32), (), (), (), topology.copy()
 
         sizes = tuple(
             int(np.count_nonzero(labels == label))
@@ -601,20 +611,40 @@ class BoardDetector:
             else 0.0
             for label in range(1, count)
         )
+        strong_fractions = tuple(
+            float(
+                np.count_nonzero(
+                    occupancy[labels == label]
+                    >= self.config.occupancy_threshold
+                )
+                / max(1, sizes[label - 1])
+            )
+            for label in range(1, count)
+        )
         if not sizes:
-            return labels.astype(np.int32), (), (), topology.copy()
+            return labels.astype(np.int32), (), (), (), topology.copy()
 
         largest = max(sizes)
         keep_labels = {
             label
-            for label, (size, mean_evidence) in enumerate(zip(sizes, means), start=1)
+            for label, (size, mean_evidence, strong_fraction) in enumerate(
+                zip(sizes, means, strong_fractions),
+                start=1,
+            )
             if (
                 size >= largest * self.config.secondary_component_keep_ratio
                 or mean_evidence >= self.config.secondary_component_min_mean_evidence
+                or strong_fraction >= self.config.secondary_component_min_strong_fraction
             )
         }
         selected = np.isin(labels, tuple(keep_labels))
-        return labels.astype(np.int32), sizes, means, selected.astype(np.bool_)
+        return (
+            labels.astype(np.int32),
+            sizes,
+            means,
+            strong_fractions,
+            selected.astype(np.bool_),
+        )
 
     @staticmethod
     def _crop_to_selected_topology(
