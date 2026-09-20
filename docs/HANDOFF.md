@@ -36,7 +36,7 @@ This classical layer is now a baseline/data-bootstrap tool, not the intended fin
 
 Observed power-up labels now in the taxonomy: `flyer`, `row`, `column`, `bomb`, and `color-remover`, plus `none` and `unknown`.
 
-A new whole-cell obstacle has been observed: it has no matchable color, cannot participate in swaps/matches, and is removed when an adjacent match touches it. Planned semantic representation: `color=none`, `kind=none`, `blocker=adjacent-clear`, `powerup=none`. `unknown` is now reserved for genuine recognition uncertainty rather than known non-applicability.
+A new whole-cell obstacle has been observed: it has no matchable color, cannot participate in swaps/matches, and is removed when an adjacent match touches it. Its synchronized semantic representation is `color=none`, `kind=none`, `blocker=adjacent-clear`, `powerup=none`. `unknown` is reserved for genuine recognition uncertainty rather than known non-applicability.
 
 ### Debugger
 
@@ -59,7 +59,7 @@ dataset/
 
 `DatasetCollector` now writes directly to `dataset/input/images`.
 
-Latest confirmed local validation before the capture-provenance commits: full `pytest` passed with 50 tests. Re-run the suite after pulling the provenance changes. Real dataset statistics at that point were 109 labeled / 0 unlabeled / 0 invalid records. The blocker head was still entirely `none`, so more blocker examples remain a priority.
+Latest confirmed local validation before the capture-provenance/taxonomy commits: full `pytest` passed with 50 tests. Re-run the suite after pulling the latest changes. Real dataset statistics at that point were 109 labeled / 0 unlabeled / 0 invalid records. The blocker head was still entirely `none`, so more blocker examples remain a priority.
 
 Dataset statistics/validation is available with:
 
