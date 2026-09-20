@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from skydom_bot.domain.tile import TileColor, TileObservation
-from skydom_bot.domain.tile_semantics import TileBlocker, TileKind
+from skydom_bot.domain.tile_semantics import TileBlocker, TileKind, TilePowerup
 from skydom_bot.vision.shape_features import ShapeDiagnostics, ShapeFeatures
 from skydom_bot.vision.tile_classifier import TileDiagnostics
 from skydom_bot.vision.tile_semantics import TileAppearance, TileSemanticClassifier
@@ -43,6 +43,8 @@ def _appearance(
         foreground_mask=empty_mask,
         shape_foreground_mask=empty_mask,
         overlay_foreground_mask=residual,
+        neutral_overlay_mask=np.zeros_like(empty_mask),
+        background_distance_mask=np.zeros_like(empty_mask),
         hue_histogram=np.zeros(180, dtype=np.float64),
         class_scores={},
         dominant_hue=60.0,
@@ -196,3 +198,42 @@ def test_same_color_chain_can_be_detected_from_peer_anomaly() -> None:
     result = TileSemanticClassifier().classify_board(normals + (chained,))[-1]
 
     assert result.blocker is TileBlocker.CHAIN
+
+
+def test_bright_neutral_overlay_is_reported_as_unknown_powerup_candidate() -> None:
+    appearance = _appearance(
+        row=0,
+        color=TileColor.ORANGE,
+        area=0.55,
+        circularity=0.80,
+        oriented_aspect=1.05,
+        solidity=0.96,
+        centroid_offset=0.02,
+        residual_fraction=0.01,
+    )
+
+    neutral = np.zeros((20, 20), dtype=np.uint8)
+    neutral.flat[:40] = 255  # 10% of the cell
+    diagnostics = TileDiagnostics(
+        crop_rgb=appearance.diagnostics.crop_rgb,
+        crop_hsv=appearance.diagnostics.crop_hsv,
+        center_mask=appearance.diagnostics.center_mask,
+        foreground_mask=appearance.diagnostics.foreground_mask,
+        shape_foreground_mask=appearance.diagnostics.shape_foreground_mask,
+        overlay_foreground_mask=appearance.diagnostics.overlay_foreground_mask,
+        neutral_overlay_mask=neutral,
+        background_distance_mask=appearance.diagnostics.background_distance_mask,
+        hue_histogram=appearance.diagnostics.hue_histogram,
+        class_scores=appearance.diagnostics.class_scores,
+        dominant_hue=appearance.diagnostics.dominant_hue,
+    )
+    appearance = TileAppearance(
+        appearance.observation,
+        diagnostics,
+        appearance.shape,
+    )
+
+    result = TileSemanticClassifier().classify_board((appearance,))[0]
+
+    assert result.powerup is TilePowerup.UNKNOWN
+    assert result.blocker is TileBlocker.NONE
