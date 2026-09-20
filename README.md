@@ -232,3 +232,41 @@ Real game captures showed that tiny per-cell visual differences could radically 
 This makes descriptors less sensitive to highlights, antialiasing, and differently colored overlays such as chains. Axis-aligned aspect ratio is still reported, but `oriented_aspect_ratio` is the more useful elongation feature for diagonal pieces such as carrots.
 
 The interactive board panel is now cropped to `BoardGeometry.bounds`. Click coordinates are translated back to full-screen coordinates internally, so the user sees only the relevant board without changing cell hit-testing.
+
+
+### Multi-cell tile comparison
+
+The tile debugger now supports side-by-side comparison of up to six cells while preserving a detailed focus view.
+
+Controls:
+
+```text
+click                  focus only this cell
+Ctrl+click             add/remove a cell from comparison
+right-click            add/remove a cell from comparison
+1..6                   focus one of the selected cells
+C                      clear the comparison selection
+S                      save the current composite view
+```
+
+The layout is split into three purposes:
+
+- **board crop:** remains large and clickable, with selected cells numbered in selection order;
+- **comparison cards:** up to six compact cards showing RGB, reconstructed base mask, residual overlay, and key shape metrics;
+- **focus row:** full color crop, hue histogram/class scores, and detailed shape diagnostics for the currently focused cell.
+
+Expensive per-cell vision diagnostics are cached in a `TileSnapshot`, so changing focus or redrawing the figure does not repeatedly recompute classification and contour features.
+
+Pressing `S` writes:
+
+```text
+artifacts/tile-compare.png
+```
+
+or another path supplied with:
+
+```powershell
+skydom-debug-tiles --screen --monitor 1 --compare-output .\artifacts\my-comparison.png
+```
+
+This view is intended for comparing visually equivalent pieces, normal vs blocked variants, and several failure cases in one shareable screenshot.
