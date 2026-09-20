@@ -38,6 +38,8 @@ class DebugContext:
     occupancy_threshold: float
     uncertain_threshold: float
     required_cardinal_neighbors: int
+    assisted_cardinal_neighbors: int
+    center_tile_evidence_threshold: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -247,25 +249,45 @@ def _render_structural_reconciliation(left: Axes, right: Axes, ctx: DebugContext
     state = ctx.diagnostics.evidence_state
     topology = ctx.diagnostics.reconciled_topology
 
+    center = ctx.diagnostics.center_tile_evidence
     left.imshow(support, vmin=0, vmax=4)
-    left.set_title("Strong cardinal-neighbor support (0..4)")
+    left.set_title(
+        "Structural support / center tile evidence\n"
+        "cell labels show neighbors / tile-score"
+    )
     left.set_xlabel("column")
     left.set_ylabel("row")
     for row in range(support.shape[0]):
         for col in range(support.shape[1]):
-            left.text(col, row, str(int(support[row, col])), ha="center", va="center", fontsize=9)
+            left.text(
+                col,
+                row,
+                f"{int(support[row, col])}/{center[row, col]:.2f}",
+                ha="center",
+                va="center",
+                fontsize=8,
+            )
 
     right.imshow(topology, cmap="gray", vmin=0, vmax=1)
     right.set_title(
         "Reconciled topology\n"
-        f"uncertain cells promoted with >= {ctx.required_cardinal_neighbors} strong neighbors"
+        f"P: >= {ctx.required_cardinal_neighbors} neighbors; "
+        f"A: >= {ctx.assisted_cardinal_neighbors} + center >= {ctx.center_tile_evidence_threshold:.2f}"
     )
     right.set_xlabel("column")
     right.set_ylabel("row")
     for row in range(topology.shape[0]):
         for col in range(topology.shape[1]):
             promoted = bool(topology[row, col]) and int(state[row, col]) == 1
-            symbol = "P" if promoted else ("X" if topology[row, col] else ".")
+            if promoted:
+                assisted = (
+                    int(support[row, col]) < ctx.required_cardinal_neighbors
+                    and int(support[row, col]) >= ctx.assisted_cardinal_neighbors
+                    and center[row, col] >= ctx.center_tile_evidence_threshold
+                )
+                symbol = "A" if assisted else "P"
+            else:
+                symbol = "X" if topology[row, col] else "."
             right.text(col, row, symbol, ha="center", va="center", fontsize=9)
 
 
@@ -395,7 +417,7 @@ def _steps() -> tuple[DebugStep, ...]:
         ),
         DebugStep(
             "11. Structural reconciliation",
-            "Uncertain cells are compared with the already-strong grid around them. The current rule is deliberately conservative: only an uncertain interior cell surrounded by strong cardinal neighbors is promoted (P).",
+            "Uncertain cells fuse structural support with an independent center-tile cue. P is a fully structural promotion; A is an assisted promotion requiring at least two strong neighbors plus strong tile-like evidence at the cell center.",
             _render_structural_reconciliation,
         ),
         DebugStep(
@@ -442,6 +464,7 @@ class VisionDebugger:
         self.previous_button.on_clicked(lambda _: self.previous())
         self.next_button.on_clicked(lambda _: self.next())
         self.figure.canvas.mpl_connect("key_press_event", self._on_key)
+        self._persistent_axes = set(self.figure.axes)
 
         self.render()
 
@@ -463,7 +486,11 @@ class VisionDebugger:
         self.render()
 
     def render(self) -> None:
-        """Redraw the current step."""
+        """Redraw the current step without leaking transient axes such as colorbars."""
+        for axis in list(self.figure.axes):
+            if axis not in self._persistent_axes:
+                axis.remove()
+
         self.left.clear()
         self.right.clear()
         self.info.clear()
@@ -555,6 +582,8 @@ def main() -> int:
         occupancy_threshold=detector.config.occupancy_threshold,
         uncertain_threshold=detector.config.occupancy_uncertain_threshold,
         required_cardinal_neighbors=detector.config.structural_required_cardinal_neighbors,
+        assisted_cardinal_neighbors=detector.config.assisted_required_cardinal_neighbors,
+        center_tile_evidence_threshold=detector.config.center_tile_evidence_threshold,
     )
 
     print(format_geometry_summary(geometry))
