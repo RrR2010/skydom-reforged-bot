@@ -1,15 +1,72 @@
+# Python bytecode and caches
 __pycache__/
 *.py[cod]
-*.egg-info/
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.pyright/
+.ruff_cache/
+.hypothesis/
+.tox/
+.nox/
+
+# Python environments
 .venv/
 venv/
-.pytest_cache/
-.coverage
-htmlcov/
-dist/
+env/
+ENV/
+.python-version
+
+# Packaging / build outputs
+*.egg-info/
+.eggs/
 build/
+dist/
+wheels/
+pip-wheel-metadata/
+
+# Coverage / test outputs
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+junit.xml
+pytest-report.xml
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+!.env.template
+
+# IDE / editor metadata
+.vscode/
+.idea/
+*.code-workspace
+*.swp
+*.swo
+*~
+
+# OS metadata
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Project-generated artifacts
 artifacts/
-*.png
-*.jpg
-*.jpeg
+
+# Local dataset and Label Studio runtime data
+# Dataset records, crops, batches, annotations, and generated reports are local
+# working data and must not be committed. Repository-level schemas/scripts stay
+# outside this directory and remain versioned.
 dataset/
+.label-studio/
+label_studio.sqlite3
+label-studio.sqlite3
+
+# Local logs / temporary files
+*.log
+*.tmp
+*.temp
+tmp/
+temp/
