@@ -149,9 +149,16 @@ def test_secondary_mini_board_is_rejected_and_primary_grid_is_normalized() -> No
     topology[4:8, 0:2] = True
     topology[8, 1:4] = True
 
-    labels, sizes, selected = detector._select_primary_topology(topology)
+    occupancy = topology.astype(np.float32)
+    # Mini-board evidence is weaker because its smaller cells are sampled on
+    # the player's larger logical pitch.
+    occupancy[4:8, 0:2] = 0.45
+    occupancy[8, 1:4] = 0.45
+
+    labels, sizes, means, selected = detector._select_primary_topology(topology, occupancy)
 
     assert max(sizes) == 81
+    assert max(means) >= 0.99
     assert int(np.count_nonzero(selected)) == 81
     assert not bool(selected[5, 0])
     assert bool(selected[5, 5])
@@ -207,3 +214,19 @@ def test_sparse_disconnected_islands_can_form_one_board_candidate() -> None:
 
     assert geometry.cols >= 9
     assert len(geometry.cells) >= 15
+
+
+def test_small_high_evidence_island_is_preserved() -> None:
+    detector = BoardDetector()
+    topology = np.zeros((7, 9), dtype=np.bool_)
+    topology[2:7, 3:6] = True
+    topology[0, 4] = True
+
+    occupancy = np.zeros((7, 9), dtype=np.float32)
+    occupancy[topology] = 0.96
+
+    labels, sizes, means, selected = detector._select_primary_topology(topology, occupancy)
+
+    assert sorted(sizes) == [1, 15]
+    assert min(means) > 0.90
+    assert bool(selected[0, 4])
