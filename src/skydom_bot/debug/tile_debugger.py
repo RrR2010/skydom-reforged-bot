@@ -381,7 +381,10 @@ class TileDebugger:
         semantic_text = (
             f"kind={semantic.kind.value}:{semantic.kind_confidence:.2f} "
             f"blocker={semantic.blocker.value}:{semantic.blocker_confidence:.2f} "
-            f"anom={semantic.shape_anomaly:.2f} res={semantic.residual_fraction:.2f}"
+            f"powerup={semantic.powerup.value}:{semantic.powerup_confidence:.2f}\n"
+            f"anom={semantic.shape_anomaly:.2f} "
+            f"res={semantic.residual_fraction:.2f} "
+            f"neutral={semantic.neutral_overlay_fraction:.2f}"
             if semantic is not None
             else "semantics=n/a"
         )
@@ -488,7 +491,10 @@ class TileDebugger:
         semantic_line = (
             f"kind={semantic.kind.value}:{semantic.kind_confidence:.2f}  "
             f"blocker={semantic.blocker.value}:{semantic.blocker_confidence:.2f}  "
-            f"anomaly={semantic.shape_anomaly:.2f} residual={semantic.residual_fraction:.2f}\n"
+            f"powerup={semantic.powerup.value}:{semantic.powerup_confidence:.2f}\n"
+            f"anomaly={semantic.shape_anomaly:.2f} "
+            f"residual={semantic.residual_fraction:.2f} "
+            f"neutral={semantic.neutral_overlay_fraction:.2f}\n"
             if semantic is not None
             else ""
         )
