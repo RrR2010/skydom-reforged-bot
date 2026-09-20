@@ -3,7 +3,7 @@
 ## Repository / branch
 
 - Repository: `RrR2010/skydom-reforged-bot`
-- Active branch: `feat/board-geometry-m1-m2`
+- Active branch: `feat/screen-corpus-capture`
 - Active PR: `#1`
 - User runs locally on Windows PowerShell.
 - Bot environment: `.venv`.
@@ -41,6 +41,18 @@ A new whole-cell obstacle has been observed: it has no matchable color, cannot p
 ### Debugger
 
 `skydom-debug-tiles` supports multi-cell comparison and exporting selected cells with `E`.
+
+### Screen corpus capture
+
+A full-game-area corpus workflow is available independently of the tile dataset.
+
+- `skydom-capture-screen --configure` stores the reusable monitor-local game region.
+- `skydom-capture-screen <stage>` performs one CLI capture.
+- `skydom-capture-gui` opens a narrow always-on-top Tkinter form for repeated manual capture.
+- The GUI persists its last values in `corpus/capture-form.json`.
+- Canonical GUI metadata keys are `mode`, `initial_moves`, `board_variant`, and `has_ice`; four additional arbitrary key/value rows are available and cannot overwrite canonical keys.
+- Repeated captures with identical stage/metadata accumulate because each image receives a timestamped `capture_id`.
+- `skydom-analyze-corpus` evaluates captured screens offline with the current board detector.
 
 ### Dataset
 

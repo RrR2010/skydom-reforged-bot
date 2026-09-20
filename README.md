@@ -637,3 +637,84 @@ For continued development across agents or long-running sessions, see:
 - `docs/TODO.md` — prioritized roadmap and validation checklist;
 - `docs/HANDOFF.md` — current branch state, working conventions, known
   variants, and immediate next steps.
+
+
+## Screen corpus: manual game-area capture
+
+Use the screen corpus to collect many full game scenarios without mixing browser chrome, ads, or the Windows taskbar into the vision fixtures.
+
+Configure the useful game region once:
+
+```powershell
+skydom-capture-screen --configure
+```
+
+An OpenCV ROI window opens on the selected monitor. Drag around the game canvas, press ENTER, and the monitor-local region is saved under `corpus/region.json`.
+
+You can also configure it numerically:
+
+```powershell
+skydom-capture-screen --configure --region 190,163,1016,534
+```
+
+For high-volume manual capture, open the compact side panel:
+
+```powershell
+skydom-capture-gui
+```
+
+The narrow Tkinter form stays on top by default and keeps its values after each capture. It also restores the last values on the next launch from `corpus/capture-form.json`. The fixed fields are:
+
+- stage ID;
+- mode;
+- initial moves;
+- board variant;
+- has ice.
+
+Four additional name/value rows accept arbitrary metadata. Extra rows cannot overwrite the fixed metadata keys. Press **CAPTURE** or **Ctrl+Enter** to append another screenshot; repeated captures of the same stage and metadata remain separate observations.
+
+The CLI remains available for scripted or occasional captures:
+
+```powershell
+skydom-capture-screen level-27
+skydom-capture-screen level-27 --meta mode=normal --meta goal=carrot
+skydom-capture-screen competitive-3 --meta mode=competitive --meta note=opponent-mini-board
+```
+
+Each trigger writes:
+
+```text
+corpus/
+  region.json
+  screens/
+    <stage>__<utc-timestamp>.png
+  metadata/
+    <stage>__<utc-timestamp>.json
+```
+
+The entire `corpus/` directory is ignored by Git.
+
+Analyze every captured screen offline with the current board detector:
+
+```powershell
+skydom-analyze-corpus
+```
+
+Outputs are written to:
+
+```text
+corpus/derived/
+  analysis.md
+  analysis.csv
+  analysis.jsonl
+```
+
+The report classifies captures as `OK`, `REVIEW`, or `FAIL`. Review signals include low detector confidence, X/Y pitch disagreement, ambiguous scale components, and detected scaled sub-grids.
+
+To also export the currently detected cell crops for visual review or later dataset curation:
+
+```powershell
+skydom-analyze-corpus --export-cells
+```
+
+Derived cell crops remain unlabeled artifacts; they are not automatically promoted to human ground truth.

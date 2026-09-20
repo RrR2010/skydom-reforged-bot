@@ -29,6 +29,33 @@ _TOPICS: dict[str, str] = {
           S  save the comparison image
           C  clear comparison selection
     """),
+    "capture-screen": dedent("""
+        Capture one manually triggered full game-area screenshot into the local corpus.
+
+          skydom-capture-screen --configure
+          skydom-capture-screen level-27 --meta mode=normal --meta goal=carrot
+
+        The configured region excludes browser chrome and is reused on later captures.
+        Images and metadata stay under corpus/ and are ignored by Git.
+    """),
+    "capture-gui": dedent("""
+        Open a narrow persistent form for repeated corpus captures.
+
+          skydom-capture-gui
+
+        Fixed metadata fields: mode, initial_moves, board_variant, has_ice.
+        Four extra name/value metadata rows are also available. Form values
+        persist between captures and are restored on the next launch.
+    """),
+    "analyze-corpus": dedent("""
+        Run the current BoardDetector against every captured corpus screen.
+
+          skydom-analyze-corpus
+          skydom-analyze-corpus --export-cells
+
+        Writes corpus/derived/analysis.md, .csv and .jsonl with OK/REVIEW/FAIL
+        status plus a review queue for unusual or failing scenarios.
+    """),
     "collect": dedent("""
         Capture the current board and collect every active cell.
 
@@ -101,12 +128,21 @@ def _parser() -> argparse.ArgumentParser:
               skydom-inspect              inspect board geometry
               skydom-debug-vision         visual board-geometry debugger
               skydom-debug-tiles          interactive tile debugger / selective export
+              skydom-capture-screen       save one full game-area corpus screenshot
+              skydom-capture-gui         narrow persistent capture form
+              skydom-analyze-corpus       evaluate all corpus screenshots offline
               skydom-collect-tiles        capture and collect all active cells
               skydom-dataset-stats        summarize/validate human labels
               skydom-export-label-studio  create incremental Label Studio task batch
               skydom-import-label-studio  merge human labels back into records
 
-            Quick workflow:
+            Screen-corpus workflow:
+              skydom-capture-screen --configure
+              skydom-capture-gui
+              # or: skydom-capture-screen level-27 --meta mode=normal
+              skydom-analyze-corpus
+
+            Tile-labeling workflow:
               skydom-collect-tiles
               skydom-export-label-studio
               # Sync + annotate in Label Studio
@@ -114,6 +150,9 @@ def _parser() -> argparse.ArgumentParser:
               skydom-dataset-stats
 
             More detail:
+              skydom help capture-screen
+              skydom help capture-gui
+              skydom help analyze-corpus
               skydom help workflow
               skydom help collect
               skydom help stats
