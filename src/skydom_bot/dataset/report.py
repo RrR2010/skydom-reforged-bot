@@ -16,7 +16,7 @@ BASELINE_COMBINATION_SAMPLES = 5
 ROBUST_COMBINATION_SAMPLES = 10
 DESIRED_CLASS_SAMPLES = 25
 DESIRED_COLOR_SAMPLES = 30
-MIN_INDEPENDENT_CAPTURES = 3
+MIN_CAPTURE_GROUPS = 3
 PROVENANCE_CONFIDENCE_THRESHOLD = 0.80
 
 
@@ -80,10 +80,10 @@ def _capture_text(
     *,
     provenance_trusted: bool,
 ) -> str:
-    """Render capture diversity conservatively when provenance is incomplete."""
+    """Render capture-group evidence conservatively when provenance is incomplete."""
     if not provenance_trusted:
         return f"{captures} known (partial)"
-    if captures < MIN_INDEPENDENT_CAPTURES:
+    if captures < MIN_CAPTURE_GROUPS:
         return f"{captures} (low)"
     return str(captures)
 
@@ -163,7 +163,7 @@ def build_collection_report(stats: DatasetStatistics) -> str:
             f"| Combination | ≥{ROBUST_COMBINATION_SAMPLES} | robust-candidate |",
             f"| Power-up/blocker class | ~{DESIRED_CLASS_SAMPLES} | preferred first-training volume |",
             f"| Color | ~{DESIRED_COLOR_SAMPLES} | preferred overall representation |",
-            f"| Capture groups | ≥{MIN_INDEPENDENT_CAPTURES} | minimum diversity evidence when provenance is reliable |",
+            f"| Capture groups | ≥{MIN_CAPTURE_GROUPS} | minimum diversity evidence when provenance is reliable |",
             "",
             "## What to collect next",
             "",
@@ -203,7 +203,7 @@ def build_collection_report(stats: DatasetStatistics) -> str:
                     captures = powerup_color_captures.get(powerup, {}).get(color, 0)
                     weak.append(
                         f"{color}: {count} samples, "
-                        f"{_capture_text(captures, provenance_trusted=provenance_trusted)} captures, "
+                        f"{_capture_text(capture groups, provenance_trusted=provenance_trusted)} capture groups, "
                         f"{band.name}"
                     )
             detail = "; ".join(weak) if weak else "all observed colors at baseline or better"
@@ -233,7 +233,7 @@ def build_collection_report(stats: DatasetStatistics) -> str:
         band = coverage_band(count)
         lines.append(
             f"| {color} | {count} | "
-            f"{_capture_text(captures, provenance_trusted=provenance_trusted)} | "
+            f"{_capture_text(capture groups, provenance_trusted=provenance_trusted)} | "
             f"{band.name} |"
         )
 
