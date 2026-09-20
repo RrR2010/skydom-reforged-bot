@@ -9,6 +9,7 @@ from enum import Enum
 class TileKind(str, Enum):
     """Semantic role of the visible base object in one board cell."""
 
+    NONE = "none"
     NORMAL = "normal"
     CARROT = "carrot"
     UNKNOWN = "unknown"
@@ -31,6 +32,7 @@ class TileBlocker(str, Enum):
 
     NONE = "none"
     CHAIN = "chain"
+    ADJACENT_CLEAR = "adjacent-clear"
     UNKNOWN = "unknown"
 
 
