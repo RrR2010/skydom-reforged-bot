@@ -22,6 +22,7 @@ class TileClassifierConfig:
     saturation_min: int = 105
     value_min: int = 125
     min_foreground_fraction: float = 0.08
+    shape_inset_ratio: float = 0.04
     histogram_bins: int = 180
     min_class_confidence: float = 0.50
 
@@ -34,6 +35,7 @@ class TileDiagnostics:
     crop_hsv: UInt8Image
     center_mask: UInt8Image
     foreground_mask: UInt8Image
+    shape_foreground_mask: UInt8Image
     hue_histogram: NDArray[np.float64]
     class_scores: dict[TileColor, float]
     dominant_hue: float | None
@@ -82,6 +84,23 @@ class TileClassifier:
         )
         foreground = cv2.bitwise_and(center_mask, saturated)
 
+        # Shape analysis has a different objective from color analysis. Color
+        # benefits from sampling only the tile center, while shape must retain
+        # the whole silhouette. Use the same saturation/value foreground cue
+        # across almost the entire cell, trimming only a thin border to avoid
+        # the purple grid frame and neighboring cells.
+        shape_region = np.zeros((height, width), dtype=np.uint8)
+        inset_x = max(1, int(round(width * self.config.shape_inset_ratio)))
+        inset_y = max(1, int(round(height * self.config.shape_inset_ratio)))
+        cv2.rectangle(
+            shape_region,
+            (inset_x, inset_y),
+            (max(inset_x, width - inset_x - 1), max(inset_y, height - inset_y - 1)),
+            255,
+            -1,
+        )
+        shape_foreground = cv2.bitwise_and(shape_region, saturated)
+
         center_pixels = max(1, int(np.count_nonzero(center_mask)))
         foreground_pixels = int(np.count_nonzero(foreground))
         foreground_fraction = foreground_pixels / center_pixels
@@ -114,6 +133,7 @@ class TileClassifier:
             crop_hsv=hsv,
             center_mask=center_mask,
             foreground_mask=foreground,
+            shape_foreground_mask=shape_foreground,
             hue_histogram=histogram,
             class_scores=scores,
             dominant_hue=dominant_hue,
