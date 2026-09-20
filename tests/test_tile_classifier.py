@@ -96,3 +96,20 @@ def test_orange_plurality_confidence_matches_real_gradient_case() -> None:
 
     assert color is TileColor.ORANGE
     assert confidence == pytest.approx(0.54)
+
+
+def test_shape_foreground_is_not_clipped_by_color_circle() -> None:
+    image = np.zeros((80, 80, 3), dtype=np.uint8)
+    image[:] = (35, 42, 108)
+    cell = Cell(0, 0, Point(40, 40), Rect(0, 0, 80, 80), 1.0)
+
+    green = _rgb_from_hsv(60)
+    # Elongated object deliberately extends beyond the circular color mask.
+    cv2.ellipse(image, (40, 40), (32, 14), -30, 0, 360, green, -1)
+
+    _, diagnostics = TileClassifier().classify_cell(image, cell)
+
+    assert np.count_nonzero(diagnostics.shape_foreground_mask) > np.count_nonzero(
+        diagnostics.foreground_mask
+    )
+    assert diagnostics.shape_foreground_mask[20, 58] > 0 or diagnostics.shape_foreground_mask[60, 22] > 0
