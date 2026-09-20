@@ -17,7 +17,7 @@
 - [x] Identify initial real power-up types: flyer, row, column, bomb, color-remover.
 - [x] Add observed `TilePowerup` enum values and synchronize Label Studio config.
 - [ ] Capture animation/highlight/hint states and decide whether they are excluded, separately labeled, or temporally filtered.
-- [ ] Add dataset statistics command: counts by color/kind/blocker/powerup and unlabeled count.
+- [x] Add dataset statistics command: counts by color/kind/blocker/powerup and unlabeled count.
 - [ ] Add train/validation split keyed by capture/board rather than random crop only, to reduce leakage.
 
 ## Learned recognition
