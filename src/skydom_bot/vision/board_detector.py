@@ -44,6 +44,11 @@ class BoardDetectorConfig:
     occupancy_threshold: float = 0.50
     occupancy_uncertain_threshold: float = 0.25
     structural_required_cardinal_neighbors: int = 4
+    assisted_required_cardinal_neighbors: int = 2
+    center_tile_radius_ratio: float = 0.30
+    center_tile_saturation_min: int = 105
+    center_tile_value_min: int = 125
+    center_tile_evidence_threshold: float = 0.45
     secondary_component_keep_ratio: float = 0.35
     secondary_component_min_mean_evidence: float = 0.80
     cell_corner_ratio: float = 0.16
@@ -78,6 +83,7 @@ class BoardDetectionDiagnostics:
     occupancy: NDArray[np.float32]
     evidence_state: NDArray[np.uint8]
     cardinal_support: NDArray[np.uint8]
+    center_tile_evidence: NDArray[np.float32]
     reconciled_topology: NDArray[np.bool_]
     topology_components: NDArray[np.int32]
     topology_component_sizes: tuple[int, ...]
@@ -131,7 +137,18 @@ class BoardDetector:
         ice_mask = self._ice_surface_mask(image_rgb)
         evidence_mask = cv2.bitwise_or(component_mask, ice_mask)
         occupancy = self._cell_occupancy_grid(evidence_mask, bounds, rows, cols, pitch_x, pitch_y)
-        evidence_state, cardinal_support, reconciled_topology = self._reconcile_topology(occupancy)
+        center_tile_evidence = self._center_tile_evidence_grid(
+            image_rgb,
+            bounds,
+            rows,
+            cols,
+            pitch_x,
+            pitch_y,
+        )
+        evidence_state, cardinal_support, reconciled_topology = self._reconcile_topology(
+            occupancy,
+            center_tile_evidence,
+        )
         (
             topology_components,
             component_sizes,
@@ -185,6 +202,7 @@ class BoardDetector:
             occupancy=occupancy,
             evidence_state=evidence_state,
             cardinal_support=cardinal_support,
+            center_tile_evidence=center_tile_evidence,
             reconciled_topology=reconciled_topology,
             topology_components=topology_components,
             topology_component_sizes=component_sizes,
@@ -405,9 +423,77 @@ class BoardDetector:
 
         return occupancy
 
+    def _center_tile_evidence_grid(
+        self,
+        image_rgb: UInt8Image,
+        bounds: Rect,
+        rows: int,
+        cols: int,
+        pitch_x: float,
+        pitch_y: float,
+    ) -> NDArray[np.float32]:
+        """Measure colorful tile-like evidence near each logical cell center.
+
+        Corner evidence is excellent for normal cells because pieces rarely
+        cover the corners, but blockers such as chains can obscure those same
+        corners. A second, independent cue samples a conservative center disk
+        and asks how much of it is bright and saturated like a game piece.
+
+        This cue never creates cells by itself. It can only assist an already
+        uncertain position that also has structural support from neighboring
+        cells.
+        """
+        hsv = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2HSV)
+        local = hsv[bounds.y : bounds.bottom, bounds.x : bounds.right]
+        scores = np.zeros((rows, cols), dtype=np.float32)
+
+        for row in range(rows):
+            for col in range(cols):
+                x0 = int(round(col * pitch_x))
+                x1 = int(round((col + 1) * pitch_x))
+                y0 = int(round(row * pitch_y))
+                y1 = int(round((row + 1) * pitch_y))
+                region = local[y0:y1, x0:x1]
+                if region.size == 0:
+                    continue
+
+                height, width = region.shape[:2]
+                radius = max(
+                    2,
+                    int(
+                        round(
+                            min(width, height)
+                            * self.config.center_tile_radius_ratio
+                        )
+                    ),
+                )
+                center = np.zeros((height, width), dtype=np.uint8)
+                cv2.circle(center, (width // 2, height // 2), radius, 255, -1)
+
+                colorful = cv2.inRange(
+                    region,
+                    np.array(
+                        [
+                            0,
+                            self.config.center_tile_saturation_min,
+                            self.config.center_tile_value_min,
+                        ],
+                        dtype=np.uint8,
+                    ),
+                    np.array([179, 255, 255], dtype=np.uint8),
+                )
+                sample_pixels = max(1, int(np.count_nonzero(center)))
+                scores[row, col] = float(
+                    np.count_nonzero(cv2.bitwise_and(center, colorful))
+                    / sample_pixels
+                )
+
+        return scores
+
     def _reconcile_topology(
         self,
         occupancy: NDArray[np.float32],
+        center_tile_evidence: NDArray[np.float32] | None = None,
     ) -> tuple[NDArray[np.uint8], NDArray[np.uint8], NDArray[np.bool_]]:
         """Reconcile ambiguous visual evidence with conservative grid structure.
 
@@ -417,10 +503,15 @@ class BoardDetector:
         - 1 = uncertain: plausible cell, but below the strong threshold.
         - 0 = absent: too little evidence to infer a cell.
 
-        An uncertain cell is promoted only when all configured cardinal
-        neighbors are strong. This is a deliberately conservative hysteresis
-        rule: it recovers a transiently occluded interior cell without filling
-        ordinary notches or edge gaps in an irregular board.
+        The primary promotion rule remains deliberately conservative: an
+        uncertain cell surrounded by strong cardinal neighbors is accepted.
+
+        A secondary rule handles blockers that obscure the corners used by
+        occupancy detection. An uncertain cell with at least two strong
+        cardinal neighbors may also be promoted when its center contains strong
+        tile-like saturated/bright evidence. This is evidence fusion rather
+        than a relaxed global threshold: structure and an independent visual
+        cue must agree.
         """
         strong = occupancy >= self.config.occupancy_threshold
         uncertain = (
@@ -448,10 +539,22 @@ class BoardDetector:
                     if 0 <= nr < rows and 0 <= nc < cols and strong[nr, nc]
                 )
 
-        promoted = uncertain & (
+        promoted_structural = uncertain & (
             support >= self.config.structural_required_cardinal_neighbors
         )
-        reconciled = strong | promoted
+
+        assisted = np.zeros_like(strong)
+        if center_tile_evidence is not None:
+            assisted = (
+                uncertain
+                & (support >= self.config.assisted_required_cardinal_neighbors)
+                & (
+                    center_tile_evidence
+                    >= self.config.center_tile_evidence_threshold
+                )
+            )
+
+        reconciled = strong | promoted_structural | assisted
         return state, support, reconciled
 
     def _select_primary_topology(
