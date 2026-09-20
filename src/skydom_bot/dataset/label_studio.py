@@ -1,8 +1,9 @@
-"""Export the local crop dataset into Label Studio task format."""
+"""Export the local crop dataset into Label Studio storage task files."""
 
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -48,6 +49,18 @@ LABEL_CONFIG = """<View>
 """
 
 
+@dataclass(frozen=True, slots=True)
+class LabelStudioExportSummary:
+    """Paths and counts produced by one storage export."""
+
+    config_path: Path
+    source_tasks_dir: Path
+    target_dir: Path
+    created: int
+    existing: int
+    total: int
+
+
 def _prediction_result(name: str, value: str) -> dict[str, Any]:
     return {
         "from_name": name,
@@ -87,46 +100,92 @@ def _prediction(record: dict[str, Any]) -> list[dict[str, Any]]:
     }]
 
 
+def _task_from_record(record: dict[str, Any]) -> dict[str, Any] | None:
+    image = record.get("image")
+    sample_id = record.get("sample_id")
+    if not isinstance(image, str) or not isinstance(sample_id, str):
+        return None
+
+    task: dict[str, Any] = {
+        "data": {
+            "image": f"/data/local-files/?d={image}",
+            "sample_id": sample_id,
+        },
+        "meta": {
+            "row": record.get("row"),
+            "col": record.get("col"),
+            "source": record.get("source"),
+        },
+    }
+    predictions = _prediction(record)
+    if predictions:
+        task["predictions"] = predictions
+    return task
+
+
+def export_label_studio_storage(
+    dataset_root: Path,
+    output_dir: Path | None = None,
+) -> LabelStudioExportSummary:
+    """Create immutable per-sample source tasks plus an empty target directory.
+
+    One JSON file per sample works naturally with Label Studio Local Files
+    source storage: newly collected crops produce newly named task files, so
+    subsequent storage syncs can discover them without rewriting old batches.
+    Existing task files are deliberately left untouched.
+    """
+    output_dir = output_dir or dataset_root / "label_studio"
+    source_tasks_dir = output_dir / "source" / "tasks"
+    target_dir = output_dir / "target" / "annotations"
+    source_tasks_dir.mkdir(parents=True, exist_ok=True)
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    config_path = output_dir / "config.xml"
+    config_path.write_text(LABEL_CONFIG, encoding="utf-8")
+
+    records_dir = dataset_root / "records"
+    created = 0
+    existing = 0
+    total = 0
+
+    for record_path in sorted(records_dir.glob("*.json")):
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+        task = _task_from_record(record)
+        if task is None:
+            continue
+
+        sample_id = task["data"]["sample_id"]
+        task_path = source_tasks_dir / f"{sample_id}.json"
+        total += 1
+
+        if task_path.exists():
+            existing += 1
+            continue
+
+        task_path.write_text(
+            json.dumps(task, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        created += 1
+
+    return LabelStudioExportSummary(
+        config_path=config_path,
+        source_tasks_dir=source_tasks_dir,
+        target_dir=target_dir,
+        created=created,
+        existing=existing,
+        total=total,
+    )
+
+
 def export_label_studio(
     dataset_root: Path,
     output_dir: Path | None = None,
 ) -> tuple[Path, Path, int]:
-    """Write Label Studio config and tasks from local dataset records."""
-    output_dir = output_dir or dataset_root / "label_studio"
-    output_dir.mkdir(parents=True, exist_ok=True)
+    """Backward-compatible wrapper for callers of the original exporter.
 
-    records_dir = dataset_root / "records"
-    tasks: list[dict[str, Any]] = []
-
-    for record_path in sorted(records_dir.glob("*.json")):
-        record = json.loads(record_path.read_text(encoding="utf-8"))
-        image = record.get("image")
-        sample_id = record.get("sample_id")
-        if not isinstance(image, str) or not isinstance(sample_id, str):
-            continue
-
-        task: dict[str, Any] = {
-            "data": {
-                "image": f"/data/local-files/?d={image}",
-                "sample_id": sample_id,
-            },
-            "meta": {
-                "row": record.get("row"),
-                "col": record.get("col"),
-                "source": record.get("source"),
-            },
-        }
-
-        predictions = _prediction(record)
-        if predictions:
-            task["predictions"] = predictions
-        tasks.append(task)
-
-    config_path = output_dir / "config.xml"
-    tasks_path = output_dir / "tasks.json"
-    config_path.write_text(LABEL_CONFIG, encoding="utf-8")
-    tasks_path.write_text(
-        json.dumps(tasks, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
-    return config_path, tasks_path, len(tasks)
+    The second path now points to the source task directory rather than one
+    monolithic tasks.json file.
+    """
+    summary = export_label_studio_storage(dataset_root, output_dir)
+    return summary.config_path, summary.source_tasks_dir, summary.total
