@@ -10,19 +10,19 @@ _TOPICS: dict[str, str] = {
     "inspect": dedent("""\
         Inspect board geometry from a screenshot or live screen.
 
-          skydom-inspect --screen --monitor 1
+          skydom-inspect
           skydom-inspect --image .\\samples\\board.png
     """),
     "debug-vision": dedent("""\
         Open the board-geometry visual debugger.
 
-          skydom-debug-vision --screen --monitor 1
-          skydom-debug-vision --screen --monitor 1 --start-step 1
+          skydom-debug-vision
+          skydom-debug-vision --start-step 1
     """),
     "debug-tiles": dedent("""\
         Open the interactive tile debugger.
 
-          skydom-debug-tiles --screen --monitor 1
+          skydom-debug-tiles
 
         Useful keys:
           E  export selected cells to the dataset
@@ -32,7 +32,7 @@ _TOPICS: dict[str, str] = {
     "collect": dedent("""\
         Capture the current board and collect every active cell.
 
-          skydom-collect-tiles --screen --monitor 1
+          skydom-collect-tiles
           skydom-collect-tiles --image .\\samples\\board.png
 
         New crops are written directly to dataset/input/images/.
@@ -55,7 +55,7 @@ _TOPICS: dict[str, str] = {
           .\\scripts\\start-label-studio.ps1
 
         Typical labeling cycle:
-          skydom-collect-tiles --screen --monitor 1
+          skydom-collect-tiles
           skydom-export-label-studio
           # Sync + annotate in Label Studio
           skydom-import-label-studio
@@ -63,7 +63,7 @@ _TOPICS: dict[str, str] = {
     "workflow": dedent("""\
         Typical data-collection workflow:
 
-          1. skydom-collect-tiles --screen --monitor 1
+          1. skydom-collect-tiles
           2. Continue playing and collect more boards as useful.
           3. skydom-export-label-studio
           4. Sync Source Storage in Label Studio.
@@ -91,7 +91,7 @@ def _parser() -> argparse.ArgumentParser:
               skydom-import-label-studio  merge human labels back into records
 
             Quick workflow:
-              skydom-collect-tiles --screen --monitor 1
+              skydom-collect-tiles
               skydom-export-label-studio
               # Sync + annotate in Label Studio
               skydom-import-label-studio
