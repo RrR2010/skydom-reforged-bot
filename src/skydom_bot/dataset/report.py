@@ -144,7 +144,7 @@ def build_collection_report(stats: DatasetStatistics) -> str:
         lines.extend(
             [
                 "**Capture-diversity warning:** provenance coverage is still too low to use "
-                "independent-capture counts as a hard training-readiness criterion. Known capture "
+                "capture-group counts as a hard training-readiness criterion. Known capture "
                 "counts are shown as partial evidence only.",
                 "",
             ]
@@ -163,7 +163,7 @@ def build_collection_report(stats: DatasetStatistics) -> str:
             f"| Combination | ≥{ROBUST_COMBINATION_SAMPLES} | robust-candidate |",
             f"| Power-up/blocker class | ~{DESIRED_CLASS_SAMPLES} | preferred first-training volume |",
             f"| Color | ~{DESIRED_COLOR_SAMPLES} | preferred overall representation |",
-            f"| Independent captures | ≥{MIN_INDEPENDENT_CAPTURES} | minimum diversity evidence when provenance is reliable |",
+            f"| Capture groups | ≥{MIN_INDEPENDENT_CAPTURES} | minimum diversity evidence when provenance is reliable |",
             "",
             "## What to collect next",
             "",
@@ -223,7 +223,7 @@ def build_collection_report(stats: DatasetStatistics) -> str:
             "",
             f"Total carrot samples: **{kind_counts.get('carrot', 0)}**.",
             "",
-            "| Color | Samples | Independent captures | Coverage |",
+            "| Color | Samples | Capture groups | Coverage |",
             "|---|---:|---:|---|",
         ]
     )
@@ -278,11 +278,11 @@ def build_collection_report(stats: DatasetStatistics) -> str:
             "",
             "## Training strategy",
             "",
-            "1. Reach at least **3 independent-looking samples per valid combination** before treating that combination as represented.",
+            "1. Reach at least **3 unique crop samples per valid combination** before treating that combination as represented.",
             "2. Prefer **5+ samples per valid combination** for the first serious transfer-learning experiment.",
             f"3. Aim for roughly **{DESIRED_CLASS_SAMPLES} samples per rare semantic class** and **{DESIRED_COLOR_SAMPLES} per color**, without forcing redundant near-duplicates.",
             "4. Once these floors are reached, stop increasing counts blindly. Train the model and use per-head F1/recall, subgroup errors, and learning curves to decide where more data is valuable.",
-            "5. Split train/validation/test by capture group, not by crop, whenever capture provenance is available. This reduces leakage from visually related cells from the same board state.",
+            "5. Split train/validation/test by capture group, not by crop, whenever capture provenance is available. Sample counts measure unique crop hashes; capture groups measure source diversity and help prevent leakage from cells originating in the same board state.",
             "",
             "## Marginal distributions",
             "",
@@ -294,7 +294,7 @@ def build_collection_report(stats: DatasetStatistics) -> str:
             [
                 f"### {field}",
                 "",
-                "| Value | Samples | Known independent captures |",
+                "| Value | Samples | Known capture groups |",
                 "|---|---:|---:|",
             ]
         )
