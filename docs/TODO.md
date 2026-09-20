@@ -15,6 +15,7 @@
 - [ ] Annotate representative normal pieces of every color.
 - [ ] Annotate carrots in multiple colors/orientations.
 - [ ] Annotate chained pieces, especially same-color chain cases.
+- [ ] Synchronize `TileColor.NONE`, `TileKind.NONE`, and `TileBlocker.ADJACENT_CLEAR` across code, Label Studio config, importer/statistics validation, and tests before annotating the new whole-cell obstacle.
 - [x] Identify initial real power-up types: flyer, row, column, bomb, color-remover.
 - [x] Add observed `TilePowerup` enum values and synchronize Label Studio config.
 - [ ] Capture animation/highlight/hint states and decide whether they are excluded, separately labeled, or temporally filtered.
