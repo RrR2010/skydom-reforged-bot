@@ -204,26 +204,28 @@ class TileDebugger:
             f"{score_text}"
         )
 
-    def _render_overlay_residual(self, diagnostics: TileDiagnostics) -> None:
-        """Render saturated pixels excluded from the base-shape component."""
-        # Reserved for future blocker/special analysis. Keeping the mask in
-        # diagnostics already lets tests and later debuggers consume it.
-        _ = diagnostics.overlay_foreground_mask
-
     def _render_shape(self, diagnostics: ShapeDiagnostics) -> None:
         self.shape_ax.clear()
 
         top = diagnostics.contour_overlay
         mask_rgb = np.repeat(diagnostics.contour_mask[:, :, None], 3, axis=2)
+        overlay_rgb = np.repeat(
+            self._last_tile_diagnostics.overlay_foreground_mask[:, :, None],
+            3,
+            axis=2,
+        )
         separator = np.full((top.shape[0], 4, 3), 255, dtype=np.uint8)
-        combined = np.concatenate((top, separator, mask_rgb), axis=1)
+        combined = np.concatenate(
+            (top, separator, mask_rgb, separator, overlay_rgb),
+            axis=1,
+        )
         self.shape_ax.imshow(combined)
         self.shape_ax.set_axis_off()
 
         f = diagnostics.features
         self.shape_ax.set_title(
-            "Shape descriptors — color-conditioned base silhouette\n"
-            "contour overlay | binary mask\n"
+            "Shape descriptors — reconstructed base silhouette\n"
+            "contour overlay | base mask | residual overlay\n"
             f"components={f.component_count}  significant_holes={f.hole_count}\n"
             f"area={f.area_fraction:.2f}  circularity={f.circularity:.2f}\n"
             f"axis_aspect={f.aspect_ratio:.2f}  oriented_aspect={f.oriented_aspect_ratio:.2f}\n"
@@ -237,6 +239,7 @@ class TileDebugger:
             self.image_rgb,
             self.selected,
         )
+        self._last_tile_diagnostics = diagnostics
         shape = extract_shape_features(
             diagnostics.crop_rgb,
             diagnostics.shape_foreground_mask,
