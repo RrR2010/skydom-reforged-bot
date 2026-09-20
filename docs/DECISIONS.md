@@ -80,4 +80,4 @@
 
 **Reason:** a known absence is training signal, not uncertainty. Treating a non-matchable obstacle as `color=unknown` / `kind=unknown` would teach the learned model that the sample is ambiguous when its semantics are actually known. The intended representation for the observed whole-cell obstacle is `color=none`, `kind=none`, `blocker=adjacent-clear`, `powerup=none`.
 
-**Compatibility:** code enums, Label Studio configuration, importer validation, statistics validation, and tests must be synchronized before these new labels are committed as human ground truth. Until that synchronization is complete, such samples should be skipped/deferred rather than intentionally mislabeled as `unknown`.
+**Compatibility:** the code enums, generated Label Studio configuration, importer validation, statistics validation, debugger support, and tests are synchronized with these values. The classical recognizer is not required to detect `adjacent-clear`; its output remains bootstrap-only and human labels are authoritative.
