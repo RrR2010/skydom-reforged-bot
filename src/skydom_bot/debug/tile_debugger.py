@@ -33,6 +33,7 @@ UInt8Image = NDArray[np.uint8]
 CellKey = tuple[int, int]
 
 _SYMBOLS = {
+    TileColor.NONE: "-",
     TileColor.RED: "R",
     TileColor.ORANGE: "O",
     TileColor.YELLOW: "Y",
