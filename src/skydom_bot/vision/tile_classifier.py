@@ -23,7 +23,7 @@ class TileClassifierConfig:
     value_min: int = 125
     min_foreground_fraction: float = 0.08
     histogram_bins: int = 180
-    min_class_confidence: float = 0.48
+    min_class_confidence: float = 0.50
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,11 +148,12 @@ class TileClassifier:
 
         ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)
         best_color, best_score = ranked[0]
-        second_score = ranked[1][1] if len(ranked) > 1 else 0.0
 
-        # Confidence combines absolute hue mass with separation from runner-up.
-        separation = max(0.0, best_score - second_score)
-        confidence = float(np.clip(0.65 * best_score + 0.35 * separation, 0.0, 1.0))
+        # Treat the winning hue mass as the confidence baseline. Large gradient
+        # pieces (especially orange) legitimately spread across adjacent red and
+        # orange hue bins; penalizing a small runner-up margin turned correct
+        # orange pieces into UNKNOWN even when orange still held the plurality.
+        confidence = float(np.clip(best_score, 0.0, 1.0))
         if confidence < self.config.min_class_confidence:
             return TileColor.UNKNOWN, confidence
         return best_color, confidence
