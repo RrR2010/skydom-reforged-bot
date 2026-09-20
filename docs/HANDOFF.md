@@ -95,14 +95,9 @@ Latest implementation adds:
 skydom-import-label-studio
 ```
 
-It expects Label Studio Target Storage JSON files containing:
+Real Local Files Target Storage output has now been observed. Files are extensionless numeric filenames (for example `3`, `4`, ...) containing one annotation object at the root. The sample id lives under `task.data.sample_id`, while label results live in the root `result` array. The importer supports this shape as well as the earlier conventional task-export shape (`data` + `annotations[]`).
 
-- `data.sample_id`;
-- `annotations[].result` with `choices` controls named color/kind/blocker/powerup.
-
-It selects the latest annotation and writes a complete 4-field `labels` object into the canonical record while preserving `suggested`.
-
-**Important:** importer has synthetic tests but has not yet been validated against the user's real Target Storage JSON files. This is the immediate next validation gate.
+It selects the latest annotation per sample and writes a complete 4-field `labels` object into the canonical record while preserving `suggested`.
 
 ## Key real-world observations
 
