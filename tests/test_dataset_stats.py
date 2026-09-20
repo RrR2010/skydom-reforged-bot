@@ -53,7 +53,7 @@ def test_statistics_count_only_human_labels(tmp_path) -> None:
         "labeled-b",
         labels={
             "color": "green",
-            "kind": "carrot",
+            "kind": "none",
             "blocker": "chain",
             "powerup": "color-remover",
         },
@@ -68,7 +68,7 @@ def test_statistics_count_only_human_labels(tmp_path) -> None:
     assert stats.with_capture_provenance == 0
     assert stats.without_capture_provenance == 3
     assert stats.distributions["color"] == {"green": 2}
-    assert stats.distributions["kind"] == {"carrot": 1, "normal": 1}
+    assert stats.distributions["kind"] == {"none": 1, "normal": 1}
     assert stats.distributions["blocker"] == {"chain": 1, "none": 1}
     assert stats.distributions["powerup"] == {"color-remover": 1, "flyer": 1}
 
@@ -149,3 +149,102 @@ def test_statistics_accept_non_applicable_adjacent_clear_obstacle(tmp_path) -> N
     assert stats.distributions["color"] == {"none": 1}
     assert stats.distributions["kind"] == {"none": 1}
     assert stats.distributions["blocker"] == {"adjacent-clear": 1}
+
+
+def test_statistics_build_pair_and_complete_combination_distributions(tmp_path) -> None:
+    labels = {
+        "color": "blue",
+        "kind": "none",
+        "blocker": "none",
+        "powerup": "flyer",
+    }
+    _write_record(tmp_path, "blue-flyer-a", labels=labels)
+    _write_record(tmp_path, "blue-flyer-b", labels=labels)
+    _write_record(
+        tmp_path,
+        "red-bomb",
+        labels={
+            "color": "red",
+            "kind": "none",
+            "blocker": "chain",
+            "powerup": "bomb",
+        },
+    )
+
+    stats = collect_dataset_statistics(tmp_path)
+
+    assert stats.pair_distributions["powerup×color"] == {
+        "bomb": {"red": 1},
+        "flyer": {"blue": 2},
+    }
+    assert stats.pair_distributions["powerup×blocker"] == {
+        "bomb": {"chain": 1},
+        "flyer": {"none": 2},
+    }
+    assert stats.combinations[
+        "color=blue|kind=none|blocker=none|powerup=flyer"
+    ] == 2
+    assert stats.combinations[
+        "color=red|kind=none|blocker=chain|powerup=bomb"
+    ] == 1
+
+
+def test_powerup_color_gaps_prioritize_missing_combinations(tmp_path) -> None:
+    _write_record(
+        tmp_path,
+        "blue-flyer",
+        labels={
+            "color": "blue",
+            "kind": "none",
+            "blocker": "none",
+            "powerup": "flyer",
+        },
+    )
+
+    stats = collect_dataset_statistics(tmp_path, target_per_combination=3)
+
+    by_dimensions = {
+        tuple(item.dimensions): item
+        for item in stats.powerup_color_gaps
+    }
+    blue_flyer = by_dimensions[(("powerup", "flyer"), ("color", "blue"))]
+    red_flyer = by_dimensions[(("powerup", "flyer"), ("color", "red"))]
+
+    assert blue_flyer.count == 1
+    assert blue_flyer.gap == 2
+    assert blue_flyer.status == "very-low"
+    assert red_flyer.count == 0
+    assert red_flyer.gap == 3
+    assert red_flyer.status == "critical"
+    assert stats.powerup_color_gaps[0].gap == 3
+
+
+def test_statistics_reject_carrot_with_real_powerup(tmp_path) -> None:
+    _write_record(
+        tmp_path,
+        "invalid-carrot-powerup",
+        labels={
+            "color": "orange",
+            "kind": "carrot",
+            "blocker": "none",
+            "powerup": "row",
+        },
+    )
+
+    stats = collect_dataset_statistics(tmp_path)
+
+    assert stats.invalid == 1
+    assert stats.labeled == 0
+    assert any(
+        "carrot tiles cannot have a powerup" in issue.message
+        for issue in stats.issues
+    )
+
+
+def test_target_per_combination_must_be_positive(tmp_path) -> None:
+    try:
+        collect_dataset_statistics(tmp_path, target_per_combination=0)
+    except ValueError as exc:
+        assert str(exc) == "target_per_combination must be >= 1"
+    else:
+        raise AssertionError("expected ValueError")
