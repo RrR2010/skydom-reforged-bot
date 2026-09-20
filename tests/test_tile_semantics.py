@@ -237,3 +237,45 @@ def test_bright_neutral_overlay_is_reported_as_unknown_powerup_candidate() -> No
 
     assert result.powerup is TilePowerup.UNKNOWN
     assert result.blocker is TileBlocker.NONE
+
+
+def test_carrot_can_still_be_chained_when_overlay_evidence_is_strong() -> None:
+    normals = (
+        _appearance(
+            row=0,
+            color=TileColor.GREEN,
+            area=0.50,
+            circularity=0.78,
+            oriented_aspect=1.05,
+            solidity=0.96,
+            centroid_offset=0.02,
+            residual_fraction=0.01,
+        ),
+        _appearance(
+            row=1,
+            color=TileColor.GREEN,
+            area=0.51,
+            circularity=0.77,
+            oriented_aspect=1.08,
+            solidity=0.95,
+            centroid_offset=0.02,
+            residual_fraction=0.01,
+        ),
+    )
+    chained_carrot = _appearance(
+        row=2,
+        color=TileColor.GREEN,
+        area=0.31,
+        circularity=0.52,
+        oriented_aspect=1.90,
+        solidity=0.80,
+        centroid_offset=0.04,
+        residual_fraction=0.18,
+    )
+
+    result = TileSemanticClassifier().classify_board(
+        normals + (chained_carrot,)
+    )[-1]
+
+    assert result.kind is TileKind.CARROT
+    assert result.blocker is TileBlocker.CHAIN
