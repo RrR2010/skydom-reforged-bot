@@ -18,9 +18,14 @@ from skydom_bot.capture import capture_screen
 from skydom_bot.debug.report import format_geometry_summary, save_board_overlay
 from skydom_bot.domain.board import BoardGeometry, Cell
 from skydom_bot.domain.tile import TileColor, TileObservation
+from skydom_bot.domain.tile_semantics import TileBlocker, TileKind, TileSemanticObservation
 from skydom_bot.vision.board_detector import BoardDetector
 from skydom_bot.vision.shape_features import ShapeDiagnostics, extract_shape_features
 from skydom_bot.vision.tile_classifier import TileClassifier, TileDiagnostics
+from skydom_bot.vision.tile_semantics import (
+    TileAppearance,
+    TileSemanticClassifier,
+)
 
 UInt8Image = NDArray[np.uint8]
 CellKey = tuple[int, int]
@@ -44,6 +49,7 @@ class TileSnapshot:
     observation: TileObservation
     diagnostics: TileDiagnostics
     shape: ShapeDiagnostics
+    semantics: TileSemanticObservation | None = None
 
 
 def _read_rgb(path: Path) -> UInt8Image:
@@ -95,6 +101,8 @@ class TileDebugger:
         self.by_cell = {(item.row, item.col): item for item in observations}
         self.cells = geometry.cell_map
         self._cache: dict[CellKey, TileSnapshot] = {}
+        self.semantic_classifier = TileSemanticClassifier()
+        self._semantic_by_cell = self._build_semantic_map()
 
         initial = self._initial_cell()
         initial_key = self._key(initial)
@@ -143,6 +151,46 @@ class TileDebugger:
                 return self.cells[key]
         return next(iter(self.cells.values()))
 
+    def _build_semantic_map(self) -> dict[CellKey, TileSemanticObservation]:
+        """Analyze semantics against same-color peers across the whole board."""
+        appearances: list[TileAppearance] = []
+        keys: list[CellKey] = []
+
+        for cell in self.geometry.cells:
+            key = self._key(cell)
+            observation, diagnostics = self.classifier.classify_cell(
+                self.image_rgb,
+                cell,
+            )
+            shape = extract_shape_features(
+                diagnostics.crop_rgb,
+                diagnostics.shape_foreground_mask,
+            )
+            appearances.append(TileAppearance(observation, diagnostics, shape))
+            keys.append(key)
+            self._cache[key] = TileSnapshot(
+                cell=cell,
+                observation=observation,
+                diagnostics=diagnostics,
+                shape=shape,
+            )
+
+        semantics = self.semantic_classifier.classify_board(tuple(appearances))
+        mapping = dict(zip(keys, semantics))
+
+        # Attach the semantic interpretation to the cached snapshots so every
+        # panel reads one immutable object.
+        for key, semantic in mapping.items():
+            snapshot = self._cache[key]
+            self._cache[key] = TileSnapshot(
+                cell=snapshot.cell,
+                observation=snapshot.observation,
+                diagnostics=snapshot.diagnostics,
+                shape=snapshot.shape,
+                semantics=semantic,
+            )
+        return mapping
+
     def _snapshot(self, key: CellKey) -> TileSnapshot:
         """Return a cached cell analysis so redraws do not recompute vision."""
         cached = self._cache.get(key)
@@ -155,7 +203,13 @@ class TileDebugger:
             diagnostics.crop_rgb,
             diagnostics.shape_foreground_mask,
         )
-        snapshot = TileSnapshot(cell, observation, diagnostics, shape)
+        snapshot = TileSnapshot(
+            cell,
+            observation,
+            diagnostics,
+            shape,
+            self._semantic_by_cell.get(key),
+        )
         self._cache[key] = snapshot
         return snapshot
 
@@ -322,16 +376,25 @@ class TileDebugger:
         )
         ax.imshow(compact)
         f = shape.features
+        semantic = snapshot.semantics
         focus_marker = " [FOCUS]" if key == self.focused_key else ""
+        semantic_text = (
+            f"kind={semantic.kind.value}:{semantic.kind_confidence:.2f} "
+            f"blocker={semantic.blocker.value}:{semantic.blocker_confidence:.2f} "
+            f"anom={semantic.shape_anomaly:.2f} res={semantic.residual_fraction:.2f}"
+            if semantic is not None
+            else "semantics=n/a"
+        )
         ax.set_title(
             f"{index}. cell ({observation.row},{observation.col}) "
             f"{_SYMBOLS[observation.color]} {observation.confidence:.2f}{focus_marker}\n"
+            f"{semantic_text}\n"
             f"RGB | base | residual   "
             f"area={f.area_fraction:.2f} circ={f.circularity:.2f} "
             f"oAR={f.oriented_aspect_ratio:.2f} θ={f.orientation_deg:.0f}°\n"
             f"sol={f.solidity:.2f} holes={f.hole_count} "
             f"offset={f.centroid_offset:.3f}",
-            fontsize=9,
+            fontsize=8.5,
         )
 
     def _render_compare_panel(self) -> None:
@@ -421,9 +484,18 @@ class TileDebugger:
         self.shape_ax.set_axis_off()
 
         f = shape.features
+        semantic = snapshot.semantics
+        semantic_line = (
+            f"kind={semantic.kind.value}:{semantic.kind_confidence:.2f}  "
+            f"blocker={semantic.blocker.value}:{semantic.blocker_confidence:.2f}  "
+            f"anomaly={semantic.shape_anomaly:.2f} residual={semantic.residual_fraction:.2f}\n"
+            if semantic is not None
+            else ""
+        )
         self.shape_ax.set_title(
             "FOCUS contour | base | residual\n"
-            f"components={f.component_count} holes={f.hole_count} "
+            + semantic_line
+            + f"components={f.component_count} holes={f.hole_count} "
             f"area={f.area_fraction:.2f} circ={f.circularity:.2f}\n"
             f"axisAR={f.aspect_ratio:.2f} orientedAR={f.oriented_aspect_ratio:.2f} "
             f"angle={f.orientation_deg:.1f}° extent={f.extent:.2f}\n"
