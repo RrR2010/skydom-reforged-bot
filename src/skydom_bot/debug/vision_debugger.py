@@ -35,6 +35,8 @@ class DebugContext:
     geometry: BoardGeometry
     diagnostics: BoardDetectionDiagnostics
     occupancy_threshold: float
+    uncertain_threshold: float
+    required_cardinal_neighbors: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,22 +190,82 @@ def _render_occupancy(left: Axes, right: Axes, ctx: DebugContext) -> None:
 
     plt.colorbar(image, ax=left, fraction=0.046, pad=0.04)
 
-    binary = matrix >= ctx.occupancy_threshold
-    right.imshow(binary, cmap="gray", vmin=0, vmax=1)
-    right.set_title(f"Topology after threshold >= {ctx.occupancy_threshold:.2f}")
+    strong = matrix >= ctx.occupancy_threshold
+    right.imshow(strong, cmap="gray", vmin=0, vmax=1)
+    right.set_title(f"Strong visual cells >= {ctx.occupancy_threshold:.2f}")
     right.set_xlabel("column")
     right.set_ylabel("row")
 
-    for row in range(binary.shape[0]):
-        for col in range(binary.shape[1]):
+    for row in range(strong.shape[0]):
+        for col in range(strong.shape[1]):
             right.text(
                 col,
                 row,
-                "X" if binary[row, col] else ".",
+                "X" if strong[row, col] else ".",
                 ha="center",
                 va="center",
                 fontsize=9,
             )
+
+
+def _render_evidence_classes(left: Axes, right: Axes, ctx: DebugContext) -> None:
+    state = ctx.diagnostics.evidence_state
+    left.imshow(state, vmin=0, vmax=2)
+    left.set_title(
+        "Ternary visual evidence\n"
+        f"strong >= {ctx.occupancy_threshold:.2f}, "
+        f"uncertain >= {ctx.uncertain_threshold:.2f}"
+    )
+    left.set_xlabel("column")
+    left.set_ylabel("row")
+
+    labels = {0: ".", 1: "?", 2: "X"}
+    for row in range(state.shape[0]):
+        for col in range(state.shape[1]):
+            left.text(
+                col,
+                row,
+                labels[int(state[row, col])],
+                ha="center",
+                va="center",
+                fontsize=10,
+            )
+
+    matrix = ctx.diagnostics.occupancy
+    right.imshow(matrix, vmin=0.0, vmax=1.0)
+    right.set_title("Raw score retained underneath the class")
+    right.set_xlabel("column")
+    right.set_ylabel("row")
+    for row in range(matrix.shape[0]):
+        for col in range(matrix.shape[1]):
+            right.text(col, row, f"{matrix[row, col]:.2f}", ha="center", va="center", fontsize=8)
+
+
+def _render_structural_reconciliation(left: Axes, right: Axes, ctx: DebugContext) -> None:
+    support = ctx.diagnostics.cardinal_support
+    state = ctx.diagnostics.evidence_state
+    topology = ctx.diagnostics.reconciled_topology
+
+    left.imshow(support, vmin=0, vmax=4)
+    left.set_title("Strong cardinal-neighbor support (0..4)")
+    left.set_xlabel("column")
+    left.set_ylabel("row")
+    for row in range(support.shape[0]):
+        for col in range(support.shape[1]):
+            left.text(col, row, str(int(support[row, col])), ha="center", va="center", fontsize=9)
+
+    right.imshow(topology, cmap="gray", vmin=0, vmax=1)
+    right.set_title(
+        "Reconciled topology\n"
+        f"uncertain cells promoted with >= {ctx.required_cardinal_neighbors} strong neighbors"
+    )
+    right.set_xlabel("column")
+    right.set_ylabel("row")
+    for row in range(topology.shape[0]):
+        for col in range(topology.shape[1]):
+            promoted = bool(topology[row, col]) and int(state[row, col]) == 1
+            symbol = "P" if promoted else ("X" if topology[row, col] else ".")
+            right.text(col, row, symbol, ha="center", va="center", fontsize=9)
 
 
 def _render_final(left: Axes, right: Axes, ctx: DebugContext) -> None:
@@ -274,12 +336,22 @@ def _steps() -> tuple[DebugStep, ...]:
         ),
         DebugStep(
             "9. Cell evidence",
-            "Each logical cell receives a continuous score from surface evidence in its corners. This view is ideal for diagnosing false missing cells caused by hints or overlays.",
+            "Each logical cell receives a continuous score from surface evidence in its corners. The right panel shows only cells that are visually strong by themselves.",
             _render_occupancy,
         ),
         DebugStep(
-            "10. Final topology",
-            "Continuous visual evidence has now become a discrete grid representation used by later solver layers.",
+            "10. Strong / uncertain / absent",
+            "Instead of forcing an immediate yes/no decision, visual evidence is kept ternary: strong (X), uncertain (?), or absent (.). This preserves ambiguity for the next stage.",
+            _render_evidence_classes,
+        ),
+        DebugStep(
+            "11. Structural reconciliation",
+            "Uncertain cells are compared with the already-strong grid around them. The current rule is deliberately conservative: only an uncertain interior cell surrounded by strong cardinal neighbors is promoted (P).",
+            _render_structural_reconciliation,
+        ),
+        DebugStep(
+            "12. Final topology",
+            "The reconciled visual-plus-structural result becomes the discrete grid representation used by later solver layers.",
             _render_final,
         ),
     )
@@ -412,6 +484,8 @@ def main() -> int:
         geometry=geometry,
         diagnostics=diagnostics,
         occupancy_threshold=detector.config.occupancy_threshold,
+        uncertain_threshold=detector.config.occupancy_uncertain_threshold,
+        required_cardinal_neighbors=detector.config.structural_required_cardinal_neighbors,
     )
 
     if args.save_steps:
