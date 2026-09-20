@@ -36,6 +36,8 @@ This classical layer is now a baseline/data-bootstrap tool, not the intended fin
 
 Observed power-up labels now in the taxonomy: `flyer`, `row`, `column`, `bomb`, and `color-remover`, plus `none` and `unknown`.
 
+A new whole-cell obstacle has been observed: it has no matchable color, cannot participate in swaps/matches, and is removed when an adjacent match touches it. Planned semantic representation: `color=none`, `kind=none`, `blocker=adjacent-clear`, `powerup=none`. `unknown` is now reserved for genuine recognition uncertainty rather than known non-applicability.
+
 ### Debugger
 
 `skydom-debug-tiles` supports multi-cell comparison and exporting selected cells with `E`.
@@ -123,6 +125,7 @@ The real end-to-end annotation loop is now confirmed working. Example verified r
 - Chains can occlude/split base shapes and may share color with the base piece.
 - Carrots are deliberate geometric outliers and should not become chains merely because peer-shape anomaly is high.
 - Power-ups can contain large white/neutral decorations.
+- Whole-cell adjacent-clear obstacles exist and should not inherit a pseudo-color from HSV appearance.
 - Some levels have a smaller opponent board.
 - Some levels have sparse/disconnected playable topology.
 
