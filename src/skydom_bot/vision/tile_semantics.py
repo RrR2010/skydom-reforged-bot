@@ -210,10 +210,15 @@ class TileSemanticClassifier:
             blocker = TileBlocker.UNKNOWN
             blocker_confidence = float(0.35 + 0.10 * chain_votes)
 
-        # A carrot can naturally contain secondary hues in its leaves/body.
-        # Do not treat that intrinsic color variation as a chain unless the
-        # same-color peer anomaly is itself strong.
-        if kind is TileKind.CARROT and anomaly < self.config.chain_min_shape_anomaly:
+        # A carrot is intentionally a strong shape outlier relative to
+        # ordinary same-color pieces, so peer anomaly alone must never turn a
+        # clean carrot into CHAIN. Preserve the possibility of a genuinely
+        # chained carrot by requiring independent overlay evidence before a
+        # blocker can survive this override.
+        if (
+            kind is TileKind.CARROT
+            and residual < self.config.chain_min_residual_fraction
+        ):
             blocker = TileBlocker.NONE
             blocker_confidence = max(blocker_confidence, 0.90)
 
