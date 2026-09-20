@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from skydom_bot.dataset.label_studio import export_label_studio_storage
+from skydom_bot.dataset.label_studio import LABEL_CONFIG, export_label_studio_storage
 
 
 def _write_record(records, images, sample_id: str = "abc123") -> None:
@@ -27,6 +27,16 @@ def _write_record(records, images, sample_id: str = "abc123") -> None:
         encoding="utf-8",
     )
     (images / f"{sample_id}.png").write_bytes(b"png")
+
+
+def test_label_config_contains_non_applicable_and_adjacent_clear_choices() -> None:
+    assert '<Choice value="none"/>' in LABEL_CONFIG
+    assert '<Choice value="adjacent-clear"/>' in LABEL_CONFIG
+
+    color_section = LABEL_CONFIG.split('<Choices name="color"', 1)[1].split("</Choices>", 1)[0]
+    kind_section = LABEL_CONFIG.split('<Choices name="kind"', 1)[1].split("</Choices>", 1)[0]
+    assert '<Choice value="none"/>' in color_section
+    assert '<Choice value="none"/>' in kind_section
 
 
 def test_export_creates_batch_input_images_and_target_dir(tmp_path) -> None:
