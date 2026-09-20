@@ -57,6 +57,8 @@ dataset/
 
 `DatasetCollector` now writes directly to `dataset/input/images`.
 
+Latest local validation: full `pytest` passed with 50 tests. Real dataset statistics at that point were 109 labeled / 0 unlabeled / 0 invalid records. The blocker head was still entirely `none`, so more blocker examples remain a priority.
+
 Dataset statistics/validation is available with:
 
 ```powershell
@@ -64,7 +66,9 @@ skydom-dataset-stats
 skydom-dataset-stats --strict
 ```
 
-It counts human-labeled vs unlabeled records, reports class distributions for all four semantic heads, validates complete label objects and known enum values, checks sample-id/file consistency and crop existence, and never treats `suggested` as ground truth.
+It counts human-labeled vs unlabeled records, reports class distributions for all four semantic heads, validates complete label objects and known enum values, checks sample-id/file consistency and crop existence, reports capture-provenance coverage, and never treats `suggested` as ground truth.
+
+New collections store one or more `capture_ids` per sample. The ID hashes the detected board crop + topology, so all crops from one board capture can later be kept on the same side of the train/validation split. Existing legacy records without `capture_ids` remain usable for training but should not be treated as leakage-safe held-out validation unless recollected/provenance is recovered.
 
 Legacy `dataset/images` is deprecated. The exporter can migrate it once; after verification it may be deleted.
 
@@ -124,12 +128,11 @@ The real end-to-end annotation loop is now confirmed working. Example verified r
 
 ## Recommended next agent sequence
 
-1. Run the full test suite after the latest power-up taxonomy/config and dataset-statistics changes.
-2. Run `skydom-dataset-stats --strict` on the real local dataset and review class balance.
-3. Continue collecting and labeling representative normal, carrot, chain, and power-up cells.
-4. Add a board/capture-aware train/validation split to reduce leakage.
-5. Implement the first learned multi-head cell classifier once the dataset is large enough.
-6. Compare the learned recognizer against `ClassicalTileRecognizer` on the same held-out set.
+1. Continue collecting and labeling representative normal, carrot, chain, and power-up cells, especially blockers and rare power-ups.
+2. Re-run `skydom-dataset-stats --strict` periodically and watch capture-provenance coverage.
+3. Add a board/capture-aware train/validation split using `capture_ids` to reduce leakage.
+4. Implement the first learned multi-head cell classifier once the dataset is large enough.
+5. Compare the learned recognizer against `ClassicalTileRecognizer` on the same held-out set.
 
 ## Do not regress
 
