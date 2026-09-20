@@ -18,6 +18,7 @@ LABEL_CONFIG = """<View>
 
   <Header value="Color"/>
   <Choices name="color" toName="image" choice="single" showInLine="true" required="true">
+    <Choice value="none"/>
     <Choice value="red"/>
     <Choice value="orange"/>
     <Choice value="yellow"/>
@@ -29,6 +30,7 @@ LABEL_CONFIG = """<View>
 
   <Header value="Kind"/>
   <Choices name="kind" toName="image" choice="single" showInLine="true" required="true">
+    <Choice value="none"/>
     <Choice value="normal"/>
     <Choice value="carrot"/>
     <Choice value="unknown"/>
@@ -38,6 +40,7 @@ LABEL_CONFIG = """<View>
   <Choices name="blocker" toName="image" choice="single" showInLine="true" required="true">
     <Choice value="none"/>
     <Choice value="chain"/>
+    <Choice value="adjacent-clear"/>
     <Choice value="unknown"/>
   </Choices>
 
