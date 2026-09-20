@@ -59,3 +59,9 @@
 **Decision:** `.venv-labelstudio` uses Python 3.12 and remains separate from the bot `.venv`.
 
 **Reason:** Label Studio has a large dependency tree and was incompatible with the user's Python 3.14 environment because of `pkgutil.find_loader` removal through an upstream dependency.
+
+## ADR-011 — Power-up labels use observed gameplay semantics
+
+**Decision:** the current power-up taxonomy is `none`, `flyer`, `row`, `column`, `bomb`, `color-remover`, and `unknown`.
+
+**Reason:** these categories have now been observed and annotated in real gameplay. The learned recognizer should predict these as one semantic head rather than creating combined tile classes.
