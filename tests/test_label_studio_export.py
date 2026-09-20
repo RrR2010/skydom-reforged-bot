@@ -45,7 +45,7 @@ def test_export_creates_per_sample_storage_task_and_target_dir(tmp_path) -> None
 
     task_path = summary.source_tasks_dir / "abc123.json"
     task = json.loads(task_path.read_text(encoding="utf-8"))
-    assert task["data"]["image"] == "/data/local-files/?d=images/abc123.png"
+    assert task["data"]["image"] == "/data/local-files/?d=dataset/images/abc123.png"
     assert task["data"]["sample_id"] == "abc123"
     assert task["predictions"][0]["model_version"] == "classical-bootstrap"
     results = task["predictions"][0]["result"]
