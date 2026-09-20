@@ -317,3 +317,34 @@ res=<residual overlay fraction>
 ```
 
 These scores are intended to stay visible while we collect more real game variants before broadening the semantic rules.
+
+
+### Power-up extensibility and background-aware shape masks
+
+Larger boards exposed two additional perception requirements:
+
+1. blue base pieces can share hue with the dark-blue board background;
+2. special/power-up pieces may contain large white or neutral decorations that are weak in hue space.
+
+The tile classifier now estimates a local background color from cell-corner samples in CIELAB space and requires sufficient color distance from that background before a pixel can enter the base-shape mask. This prevents a blue tile's mask from expanding into the whole blue cell background.
+
+It also exposes a separate `neutral_overlay_mask` for bright, low-saturation pixels. The semantic layer treats a sufficiently large neutral overlay as an **unknown power-up candidate** rather than forcing a concrete power-up type before enough examples exist.
+
+Semantic state is now deliberately compositional:
+
+```text
+color
+kind
+blocker
+powerup
+```
+
+For example:
+
+```text
+BLUE + CARROT + NONE + NONE
+ORANGE + NORMAL + NONE + UNKNOWN_POWERUP
+PURPLE + NORMAL + CHAIN + NONE
+```
+
+The exact power-up taxonomy remains open for future additions as new game pieces are observed.
