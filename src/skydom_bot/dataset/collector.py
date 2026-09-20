@@ -40,7 +40,7 @@ class DatasetCollector:
 
     def __init__(self, root: Path = Path("dataset")) -> None:
         self.root = root
-        self.images_dir = root / "images"
+        self.images_dir = root / "input" / "images"
         self.records_dir = root / "records"
 
     @staticmethod
@@ -106,7 +106,7 @@ class DatasetCollector:
 
             crop = self._crop(image_rgb, cell)
             sample_id = self._sample_id(crop)
-            image_rel = Path("images") / f"{sample_id}.png"
+            image_rel = Path("input") / "images" / f"{sample_id}.png"
             image_path = self.root / image_rel
             record_path = self.records_dir / f"{sample_id}.json"
 
