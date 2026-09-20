@@ -36,6 +36,7 @@ class TileDiagnostics:
     center_mask: UInt8Image
     foreground_mask: UInt8Image
     shape_foreground_mask: UInt8Image
+    overlay_foreground_mask: UInt8Image
     hue_histogram: NDArray[np.float64]
     class_scores: dict[TileColor, float]
     dominant_hue: float | None
@@ -84,23 +85,6 @@ class TileClassifier:
         )
         foreground = cv2.bitwise_and(center_mask, saturated)
 
-        # Shape analysis has a different objective from color analysis. Color
-        # benefits from sampling only the tile center, while shape must retain
-        # the whole silhouette. Use the same saturation/value foreground cue
-        # across almost the entire cell, trimming only a thin border to avoid
-        # the purple grid frame and neighboring cells.
-        shape_region = np.zeros((height, width), dtype=np.uint8)
-        inset_x = max(1, int(round(width * self.config.shape_inset_ratio)))
-        inset_y = max(1, int(round(height * self.config.shape_inset_ratio)))
-        cv2.rectangle(
-            shape_region,
-            (inset_x, inset_y),
-            (max(inset_x, width - inset_x - 1), max(inset_y, height - inset_y - 1)),
-            255,
-            -1,
-        )
-        shape_foreground = cv2.bitwise_and(shape_region, saturated)
-
         center_pixels = max(1, int(np.count_nonzero(center_mask)))
         foreground_pixels = int(np.count_nonzero(foreground))
         foreground_fraction = foreground_pixels / center_pixels
@@ -120,6 +104,12 @@ class TileClassifier:
         scores = self._class_scores(histogram)
         color, confidence = self._select_color(scores, foreground_fraction)
 
+        shape_foreground, overlay_foreground = self._shape_masks(
+            hsv,
+            saturated,
+            color,
+        )
+
         observation = TileObservation(
             row=cell.row,
             col=cell.col,
@@ -134,11 +124,93 @@ class TileClassifier:
             center_mask=center_mask,
             foreground_mask=foreground,
             shape_foreground_mask=shape_foreground,
+            overlay_foreground_mask=overlay_foreground,
             hue_histogram=histogram,
             class_scores=scores,
             dominant_hue=dominant_hue,
         )
         return observation, diagnostics
+
+    def _shape_masks(
+        self,
+        hsv: UInt8Image,
+        saturated: UInt8Image,
+        color: TileColor,
+    ) -> tuple[UInt8Image, UInt8Image]:
+        """Build stable base-shape and residual-overlay masks.
+
+        Shape segmentation should describe the tile's own silhouette rather
+        than every bright/saturated object in the cell. The predicted color
+        therefore becomes an additional cue: retain same-family pixels across
+        almost the full cell, clean tiny threshold artifacts, then keep the
+        connected component nearest the cell center.
+
+        Pixels that are bright/saturated but not part of that base component
+        are preserved separately as overlay evidence. This is useful for
+        blockers such as a yellow chain crossing a purple tile.
+        """
+        height, width = saturated.shape
+        region = np.zeros((height, width), dtype=np.uint8)
+        inset_x = max(1, int(round(width * self.config.shape_inset_ratio)))
+        inset_y = max(1, int(round(height * self.config.shape_inset_ratio)))
+        cv2.rectangle(
+            region,
+            (inset_x, inset_y),
+            (max(inset_x, width - inset_x - 1), max(inset_y, height - inset_y - 1)),
+            255,
+            -1,
+        )
+        full_foreground = cv2.bitwise_and(region, saturated)
+
+        hue = hsv[:, :, 0]
+        color_mask = self._color_hue_mask(hue, color)
+        candidate = cv2.bitwise_and(full_foreground, color_mask)
+
+        kernel = np.ones((3, 3), dtype=np.uint8)
+        candidate = cv2.morphologyEx(candidate, cv2.MORPH_CLOSE, kernel)
+        candidate = cv2.morphologyEx(candidate, cv2.MORPH_OPEN, kernel)
+
+        count, labels, stats, centroids = cv2.connectedComponentsWithStats(
+            np.where(candidate > 0, 1, 0).astype(np.uint8),
+            connectivity=8,
+        )
+        shape = np.zeros_like(candidate)
+        if count > 1:
+            cx, cy = width / 2.0, height / 2.0
+            choices: list[tuple[float, int, int]] = []
+            for label in range(1, count):
+                area = int(stats[label, cv2.CC_STAT_AREA])
+                if area <= 0:
+                    continue
+                lx, ly = centroids[label]
+                distance = float(np.hypot(lx - cx, ly - cy))
+                # Prefer components near the known tile center; area breaks ties.
+                choices.append((distance, -area, label))
+            if choices:
+                _, _, selected = min(choices)
+                shape[labels == selected] = 255
+
+        overlay = cv2.bitwise_and(full_foreground, cv2.bitwise_not(shape))
+        return shape, overlay
+
+    @staticmethod
+    def _color_hue_mask(hue: NDArray[np.uint8], color: TileColor) -> UInt8Image:
+        """Return an expanded hue-family mask for silhouette extraction."""
+        ranges = {
+            TileColor.RED: ((170, 179), (0, 10)),
+            TileColor.ORANGE: ((0, 24),),
+            TileColor.YELLOW: ((15, 38),),
+            TileColor.GREEN: ((34, 90),),
+            TileColor.BLUE: ((82, 136),),
+            TileColor.PURPLE: ((128, 172),),
+        }
+        if color is TileColor.UNKNOWN:
+            return np.full(hue.shape, 255, dtype=np.uint8)
+
+        result = np.zeros(hue.shape, dtype=np.uint8)
+        for start, end in ranges[color]:
+            result[(hue >= start) & (hue <= end)] = 255
+        return result
 
     @staticmethod
     def _circular_range_sum(histogram: NDArray[np.float64], start: int, end: int) -> float:
