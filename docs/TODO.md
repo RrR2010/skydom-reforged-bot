@@ -3,6 +3,7 @@
 ## Immediate validation
 
 - [x] Pull latest branch and run full `pytest` after Label Studio importer changes (50 passed).
+- [ ] Re-run full `pytest` after board-capture provenance changes.
 - [x] Submit several annotations in Label Studio and confirm Target Storage files appear in `dataset/output/annotations`.
 - [x] Run `skydom-import-label-studio` against real Target Storage output.
 - [x] Verify imported `labels` match the UI selections and `suggested` remains unchanged.
