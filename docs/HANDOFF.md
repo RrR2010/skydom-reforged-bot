@@ -34,6 +34,8 @@ Current pipeline provides:
 
 This classical layer is now a baseline/data-bootstrap tool, not the intended final semantic recognizer.
 
+Observed power-up labels now in the taxonomy: `flyer`, `row`, `column`, `bomb`, and `color-remover`, plus `none` and `unknown`.
+
 ### Debugger
 
 `skydom-debug-tiles` supports multi-cell comparison and exporting selected cells with `E`.
@@ -99,6 +101,8 @@ Real Local Files Target Storage output has now been observed. Files are extensio
 
 It selects the latest annotation per sample and writes a complete 4-field `labels` object into the canonical record while preserving `suggested`.
 
+The real end-to-end annotation loop is now confirmed working. Example verified record `018c99bad20be95d1ef1` received human labels while retaining the original bootstrap predictions.
+
 ## Key real-world observations
 
 - Orange tiles have a red/orange hue gradient.
@@ -111,13 +115,13 @@ It selects the latest annotation per sample and writes a complete 4-field `label
 
 ## Recommended next agent sequence
 
-1. Ask the user to pull and run tests after the importer commit.
-2. Have the user submit 2–5 real Label Studio annotations.
-3. Inspect one generated file under `dataset/output/annotations` if import fails.
-4. Run `skydom-import-label-studio` and verify the matching records now contain human `labels`.
-5. Add dataset statistics/validation tooling.
-6. Continue collecting and labeling rather than tuning classical semantics.
-7. Once dataset diversity is sufficient, implement the first learned multi-head cell classifier.
+1. Run the full test suite after the latest power-up taxonomy/config updates.
+2. Add dataset statistics/validation tooling.
+3. Continue collecting and labeling representative normal, carrot, chain, and power-up cells.
+4. Review class balance and dataset diversity before training.
+5. Add a board/capture-aware train/validation split to reduce leakage.
+6. Implement the first learned multi-head cell classifier once the dataset is large enough.
+7. Compare the learned recognizer against `ClassicalTileRecognizer` on the same held-out set.
 
 ## Do not regress
 
