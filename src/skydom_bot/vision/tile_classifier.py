@@ -302,6 +302,8 @@ class TileClassifier:
         }
         if color is TileColor.UNKNOWN:
             return np.full(hue.shape, 255, dtype=np.uint8)
+        if color is TileColor.NONE:
+            return np.zeros(hue.shape, dtype=np.uint8)
 
         result = np.zeros(hue.shape, dtype=np.uint8)
         for start, end in ranges[color]:
