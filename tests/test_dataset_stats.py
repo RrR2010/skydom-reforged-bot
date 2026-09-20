@@ -65,6 +65,8 @@ def test_statistics_count_only_human_labels(tmp_path) -> None:
     assert stats.labeled == 2
     assert stats.unlabeled == 1
     assert stats.invalid == 0
+    assert stats.with_capture_provenance == 0
+    assert stats.without_capture_provenance == 3
     assert stats.distributions["color"] == {"green": 2}
     assert stats.distributions["kind"] == {"carrot": 1, "normal": 1}
     assert stats.distributions["blocker"] == {"chain": 1, "none": 1}
@@ -98,6 +100,8 @@ def test_statistics_reject_partial_or_unknown_human_labels(tmp_path) -> None:
     assert stats.labeled == 0
     assert stats.unlabeled == 0
     assert stats.invalid == 2
+    assert stats.with_capture_provenance == 0
+    assert stats.without_capture_provenance == 2
     assert len(stats.issues) == 2
 
 
