@@ -9,6 +9,7 @@ from enum import Enum
 class TileColor(str, Enum):
     """Color family used by the base Match-3 pieces."""
 
+    NONE = "none"
     RED = "red"
     ORANGE = "orange"
     YELLOW = "yellow"
