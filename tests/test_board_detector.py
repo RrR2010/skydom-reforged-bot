@@ -171,3 +171,37 @@ def test_secondary_mini_board_is_rejected_and_primary_grid_is_normalized() -> No
     assert final_bounds.x > bounds.x
     assert abs(pitch_x - 65.36) < 0.2
     assert abs(pitch_y - 66.22) < 0.2
+
+
+def test_sparse_disconnected_islands_can_form_one_board_candidate() -> None:
+    detector = BoardDetector()
+    image = np.full((900, 1600, 3), 225, dtype=np.uint8)
+    pitch = 60
+    board_color = (52, 55, 133)
+
+    # Main block.
+    for row in range(2, 7):
+        for col in range(3, 6):
+            x = 500 + col * pitch
+            y = 100 + row * pitch
+            cv2.rectangle(image, (x, y), (x + pitch - 1, y + pitch - 1), board_color, -1)
+
+    # Detached one-cell and two-cell islands one pitch away from the main block.
+    islands = [
+        (0, 4),
+        (2, 0),
+        (2, 8),
+        (4, 0),
+        (4, 1),
+        (4, 7),
+        (4, 8),
+    ]
+    for row, col in islands:
+        x = 500 + col * pitch
+        y = 100 + row * pitch
+        cv2.rectangle(image, (x, y), (x + pitch - 1, y + pitch - 1), board_color, -1)
+
+    geometry = detector.detect(image)
+
+    assert geometry.cols >= 9
+    assert len(geometry.cells) >= 15
