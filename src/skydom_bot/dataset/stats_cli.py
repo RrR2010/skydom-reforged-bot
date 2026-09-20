@@ -1,4 +1,4 @@
-"""CLI for dataset statistics and collection guidance."""
+"""CLI for dataset statistics and training-readiness guidance."""
 
 from __future__ import annotations
 
@@ -12,15 +12,9 @@ from skydom_bot.dataset.stats import collect_dataset_statistics
 def build_parser() -> argparse.ArgumentParser:
     """Build dataset statistics arguments."""
     parser = argparse.ArgumentParser(
-        description="Summarize dataset health and write collection guidance."
+        description="Summarize dataset health and write training-readiness guidance."
     )
     parser.add_argument("--dataset", type=Path, default=Path("dataset"))
-    parser.add_argument(
-        "--target",
-        type=int,
-        default=10,
-        help="Desired samples per power-up class in the collection report (default: 10).",
-    )
     parser.add_argument(
         "--report",
         type=Path,
@@ -35,7 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--details",
         action="store_true",
-        help="Also print detailed marginal and pair distributions to the console.",
+        help="Also print detailed pair distributions and observed combinations.",
     )
     parser.add_argument(
         "--strict",
@@ -53,15 +47,22 @@ def _render_counts(counts: dict[str, int]) -> str:
 def main() -> int:
     """Print compact dataset health and optionally write a Markdown report."""
     args = build_parser().parse_args()
-    if args.target < 1:
-        raise SystemExit("--target must be >= 1")
-
     stats = collect_dataset_statistics(args.dataset)
+
+    provenance = (
+        stats.labeled_with_capture_provenance / stats.labeled
+        if stats.labeled
+        else 0.0
+    )
 
     print(f"Dataset: {args.dataset}")
     print(
         f"Records: {stats.total} | Labeled: {stats.labeled} | "
         f"Unlabeled: {stats.unlabeled} | Invalid: {stats.invalid}"
+    )
+    print(
+        f"Capture provenance: {stats.labeled_with_capture_provenance}/"
+        f"{stats.labeled} labeled ({provenance:.0%})"
     )
     print(f"Color: {_render_counts(stats.distributions['color'])}")
     print(f"Kind: {_render_counts(stats.distributions['kind'])}")
@@ -87,12 +88,8 @@ def main() -> int:
 
     if not args.no_report:
         report_path = args.report or args.dataset / "dataset-stats.md"
-        write_collection_report(
-            report_path,
-            stats,
-            target_per_class=args.target,
-        )
-        print(f"Collection report: {report_path}")
+        write_collection_report(report_path, stats)
+        print(f"Training-readiness report: {report_path}")
 
     if stats.issues:
         print(f"Validation issues: {len(stats.issues)}")
