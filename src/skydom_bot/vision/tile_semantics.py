@@ -10,6 +10,7 @@ from skydom_bot.domain.tile import TileColor, TileObservation
 from skydom_bot.domain.tile_semantics import (
     TileBlocker,
     TileKind,
+    TilePowerup,
     TileSemanticObservation,
 )
 from skydom_bot.vision.shape_features import ShapeDiagnostics
@@ -32,12 +33,15 @@ class TileSemanticConfig:
     carrot_min_oriented_aspect: float = 1.65
     carrot_max_centroid_offset: float = 0.09
     carrot_min_solidity: float = 0.86
-    carrot_max_residual_fraction: float = 0.06
+    normal_max_shape_anomaly: float = 1.75
 
     chain_min_residual_fraction: float = 0.08
     chain_min_shape_anomaly: float = 1.75
     chain_low_solidity: float = 0.90
     chain_low_circularity: float = 0.64
+
+    powerup_min_neutral_fraction: float = 0.045
+    powerup_strong_neutral_fraction: float = 0.085
 
     min_peer_count: int = 2
     robust_scale_floor: float = 0.035
@@ -57,6 +61,11 @@ class TileSemanticClassifier:
     @staticmethod
     def _residual_fraction(appearance: TileAppearance) -> float:
         mask = appearance.diagnostics.overlay_foreground_mask
+        return float(np.count_nonzero(mask) / max(1, mask.size))
+
+    @staticmethod
+    def _neutral_overlay_fraction(appearance: TileAppearance) -> float:
+        mask = appearance.diagnostics.neutral_overlay_mask
         return float(np.count_nonzero(mask) / max(1, mask.size))
 
     @staticmethod
@@ -119,13 +128,13 @@ class TileSemanticClassifier:
     ) -> TileSemanticObservation:
         f = appearance.shape.features
         residual = self._residual_fraction(appearance)
+        neutral = self._neutral_overlay_fraction(appearance)
         anomaly = self._shape_anomaly(appearance, peers)
 
         carrot_signals = (
             f.oriented_aspect_ratio >= self.config.carrot_min_oriented_aspect,
             f.centroid_offset <= self.config.carrot_max_centroid_offset,
             f.solidity >= self.config.carrot_min_solidity,
-            residual <= self.config.carrot_max_residual_fraction,
         )
         carrot_score = sum(carrot_signals) / len(carrot_signals)
 
@@ -140,12 +149,42 @@ class TileSemanticClassifier:
                     + 0.10 * (1.0 - min(1.0, f.centroid_offset / 0.15)),
                 )
             )
-        elif anomaly < 1.5 and residual < self.config.chain_min_residual_fraction:
+        elif (
+            anomaly <= self.config.normal_max_shape_anomaly
+            and residual < self.config.chain_min_residual_fraction
+        ):
             kind = TileKind.NORMAL
             kind_confidence = float(np.clip(1.0 - anomaly / 3.0, 0.5, 0.95))
         else:
             kind = TileKind.UNKNOWN
             kind_confidence = float(max(0.0, carrot_score - 0.25))
+
+        if neutral >= self.config.powerup_min_neutral_fraction:
+            powerup = TilePowerup.UNKNOWN
+            powerup_confidence = float(
+                np.clip(
+                    0.55
+                    + 0.45
+                    * (
+                        neutral
+                        / max(
+                            self.config.powerup_strong_neutral_fraction,
+                            neutral,
+                        )
+                    ),
+                    0.55,
+                    1.0,
+                )
+            )
+        else:
+            powerup = TilePowerup.NONE
+            powerup_confidence = float(
+                np.clip(
+                    1.0 - neutral / max(self.config.powerup_min_neutral_fraction, 1e-6),
+                    0.55,
+                    0.98,
+                )
+            )
 
         chain_signals = (
             residual >= self.config.chain_min_residual_fraction,
@@ -171,11 +210,22 @@ class TileSemanticClassifier:
             blocker = TileBlocker.UNKNOWN
             blocker_confidence = float(0.35 + 0.10 * chain_votes)
 
-        # A clean carrot is an objective piece, not a chain merely because its
-        # elongated geometry is anomalous relative to normal green pieces.
-        if kind is TileKind.CARROT and residual <= self.config.carrot_max_residual_fraction:
+        # A carrot can naturally contain secondary hues in its leaves/body.
+        # Do not treat that intrinsic color variation as a chain unless the
+        # same-color peer anomaly is itself strong.
+        if kind is TileKind.CARROT and anomaly < self.config.chain_min_shape_anomaly:
             blocker = TileBlocker.NONE
             blocker_confidence = max(blocker_confidence, 0.90)
+
+        # Large neutral decorations are more consistent with an unknown power-up
+        # than with a chain. Keep the exact power-up type open until we collect
+        # enough real examples.
+        if (
+            powerup is TilePowerup.UNKNOWN
+            and chain_votes < 4
+        ):
+            blocker = TileBlocker.NONE
+            blocker_confidence = max(blocker_confidence, 0.70)
 
         return TileSemanticObservation(
             row=appearance.observation.row,
@@ -184,6 +234,9 @@ class TileSemanticClassifier:
             kind_confidence=kind_confidence,
             blocker=blocker,
             blocker_confidence=blocker_confidence,
+            powerup=powerup,
+            powerup_confidence=powerup_confidence,
             residual_fraction=residual,
+            neutral_overlay_fraction=neutral,
             shape_anomaly=anomaly,
         )
