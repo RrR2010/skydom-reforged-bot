@@ -131,10 +131,17 @@ class TileSemanticClassifier:
         neutral = self._neutral_overlay_fraction(appearance)
         anomaly = self._shape_anomaly(appearance, peers)
 
-        carrot_signals = (
+        carrot_core_signals = (
             f.oriented_aspect_ratio >= self.config.carrot_min_oriented_aspect,
             f.centroid_offset <= self.config.carrot_max_centroid_offset,
-            f.solidity >= self.config.carrot_min_solidity,
+        )
+        carrot_shape_ok = f.solidity >= self.config.carrot_min_solidity
+        carrot_blocker_compensation = (
+            residual >= self.config.chain_min_residual_fraction
+        )
+        carrot_signals = (
+            *carrot_core_signals,
+            carrot_shape_ok or carrot_blocker_compensation,
         )
         carrot_score = sum(carrot_signals) / len(carrot_signals)
 
@@ -145,7 +152,12 @@ class TileSemanticClassifier:
                     1.0,
                     0.55
                     + 0.20 * min(1.0, (f.oriented_aspect_ratio - 1.0) / 1.5)
-                    + 0.15 * f.solidity
+                    + 0.15 * max(
+                        f.solidity,
+                        self.config.carrot_min_solidity
+                        if carrot_blocker_compensation
+                        else f.solidity,
+                    )
                     + 0.10 * (1.0 - min(1.0, f.centroid_offset / 0.15)),
                 )
             )
