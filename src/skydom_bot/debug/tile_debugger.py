@@ -111,7 +111,9 @@ class TileDebugger:
         if event.inaxes is not self.board_ax or event.xdata is None or event.ydata is None:
             return
 
-        x, y = float(event.xdata), float(event.ydata)
+        bounds = self.geometry.bounds
+        x = float(event.xdata) + bounds.x
+        y = float(event.ydata) + bounds.y
         for cell in self.geometry.cells:
             if (
                 cell.bounds.x <= x < cell.bounds.right
@@ -123,8 +125,10 @@ class TileDebugger:
 
     def _render_board(self) -> None:
         self.board_ax.clear()
-        self.board_ax.imshow(self.image_rgb)
-        self.board_ax.set_title("Recognized board — click any active cell")
+        bounds = self.geometry.bounds
+        board_crop = self.image_rgb[bounds.y : bounds.bottom, bounds.x : bounds.right]
+        self.board_ax.imshow(board_crop)
+        self.board_ax.set_title("Recognized board crop — click any active cell")
         self.board_ax.set_axis_off()
 
         for cell in self.geometry.cells:
@@ -133,7 +137,10 @@ class TileDebugger:
             linewidth = 3 if selected else 1
             self.board_ax.add_patch(
                 plt.Rectangle(
-                    (cell.bounds.x, cell.bounds.y),
+                    (
+                        cell.bounds.x - self.geometry.bounds.x,
+                        cell.bounds.y - self.geometry.bounds.y,
+                    ),
                     cell.bounds.width,
                     cell.bounds.height,
                     fill=False,
@@ -141,8 +148,8 @@ class TileDebugger:
                 )
             )
             self.board_ax.text(
-                cell.center.x,
-                cell.center.y,
+                cell.center.x - self.geometry.bounds.x,
+                cell.center.y - self.geometry.bounds.y,
                 f"{_SYMBOLS[observation.color]}\n{observation.confidence:.2f}",
                 ha="center",
                 va="center",
@@ -197,6 +204,12 @@ class TileDebugger:
             f"{score_text}"
         )
 
+    def _render_overlay_residual(self, diagnostics: TileDiagnostics) -> None:
+        """Render saturated pixels excluded from the base-shape component."""
+        # Reserved for future blocker/special analysis. Keeping the mask in
+        # diagnostics already lets tests and later debuggers consume it.
+        _ = diagnostics.overlay_foreground_mask
+
     def _render_shape(self, diagnostics: ShapeDiagnostics) -> None:
         self.shape_ax.clear()
 
@@ -209,11 +222,12 @@ class TileDebugger:
 
         f = diagnostics.features
         self.shape_ax.set_title(
-            "Shape descriptors — full-cell foreground, no circular color mask\n"
+            "Shape descriptors — color-conditioned base silhouette\n"
             "contour overlay | binary mask\n"
-            f"components={f.component_count}  holes={f.hole_count}\n"
+            f"components={f.component_count}  significant_holes={f.hole_count}\n"
             f"area={f.area_fraction:.2f}  circularity={f.circularity:.2f}\n"
-            f"aspect={f.aspect_ratio:.2f}  extent={f.extent:.2f}\n"
+            f"axis_aspect={f.aspect_ratio:.2f}  oriented_aspect={f.oriented_aspect_ratio:.2f}\n"
+            f"orientation={f.orientation_deg:.1f}°  extent={f.extent:.2f}\n"
             f"solidity={f.solidity:.2f}  centroid_offset={f.centroid_offset:.3f}"
         )
 
