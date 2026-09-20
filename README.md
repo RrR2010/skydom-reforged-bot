@@ -434,9 +434,8 @@ The Label Studio integration uses a storage-first, incremental layout:
 
 ```text
 dataset/
-  images/                  # canonical crops collected by the bot
   records/                 # canonical sample metadata
-  input/                   # everything Label Studio reads
+  input/                   # canonical crops + everything Label Studio reads
     batch-tasks-0001.json
     batch-tasks-0002.json
     images/
@@ -452,9 +451,11 @@ Run:
 skydom-export-label-studio
 ```
 
-The exporter copies any missing canonical crops into `dataset/input/images`
-and creates a new immutable batch file containing only samples that have not
-appeared in earlier `batch-tasks-*.json` files.
+The collector now writes crops directly into `dataset/input/images`. The
+exporter creates a new immutable batch file containing only samples that have
+not appeared in earlier `batch-tasks-*.json` files. For compatibility, the
+exporter can migrate crops once from the old `dataset/images` location and
+normalizes their record paths.
 
 For example:
 
