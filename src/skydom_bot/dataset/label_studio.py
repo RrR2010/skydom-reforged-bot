@@ -1,8 +1,10 @@
-"""Export the local crop dataset into Label Studio storage task files."""
+"""Export the local crop dataset into Label Studio storage batches."""
 
 from __future__ import annotations
 
 import json
+import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -48,17 +50,22 @@ LABEL_CONFIG = """<View>
 </View>
 """
 
+_BATCH_RE = re.compile(r"^batch-tasks-(\d{4})\.json$")
+
 
 @dataclass(frozen=True, slots=True)
 class LabelStudioExportSummary:
-    """Paths and counts produced by one storage export."""
+    """Paths and counts produced by one incremental storage export."""
 
     config_path: Path
-    source_tasks_dir: Path
-    target_dir: Path
-    created: int
-    existing: int
-    total: int
+    input_dir: Path
+    images_dir: Path
+    output_dir: Path
+    batch_path: Path | None
+    new_samples: int
+    existing_samples: int
+    total_samples: int
+    copied_images: int
 
 
 def _prediction_result(name: str, value: str) -> dict[str, Any]:
@@ -101,17 +108,13 @@ def _prediction(record: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _task_from_record(record: dict[str, Any]) -> dict[str, Any] | None:
-    image = record.get("image")
     sample_id = record.get("sample_id")
-    if not isinstance(image, str) or not isinstance(sample_id, str):
+    if not isinstance(sample_id, str):
         return None
 
     task: dict[str, Any] = {
         "data": {
-            # LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT is the repository root,
-            # while the Local Files storage itself points to the dataset
-            # subdirectory. Therefore media URLs are repository-root-relative.
-            "image": f"/data/local-files/?d=dataset/{image}",
+            "image": f"/data/local-files/?d=input/images/{sample_id}.png",
             "sample_id": sample_id,
         },
         "meta": {
@@ -126,30 +129,91 @@ def _task_from_record(record: dict[str, Any]) -> dict[str, Any] | None:
     return task
 
 
+def _existing_exported_ids(input_dir: Path) -> set[str]:
+    exported: set[str] = set()
+    for batch_path in sorted(input_dir.glob("batch-tasks-*.json")):
+        if not _BATCH_RE.match(batch_path.name):
+            continue
+        try:
+            payload = json.loads(batch_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if not isinstance(payload, list):
+            continue
+        for task in payload:
+            if not isinstance(task, dict):
+                continue
+            data = task.get("data")
+            if not isinstance(data, dict):
+                continue
+            sample_id = data.get("sample_id")
+            if isinstance(sample_id, str):
+                exported.add(sample_id)
+    return exported
+
+
+def _next_batch_path(input_dir: Path) -> Path:
+    numbers = [
+        int(match.group(1))
+        for path in input_dir.glob("batch-tasks-*.json")
+        if (match := _BATCH_RE.match(path.name))
+    ]
+    next_number = max(numbers, default=0) + 1
+    return input_dir / f"batch-tasks-{next_number:04d}.json"
+
+
+def _copy_input_image(
+    dataset_root: Path,
+    images_dir: Path,
+    record: dict[str, Any],
+) -> bool:
+    """Ensure the Label Studio input tree contains the crop image."""
+    sample_id = record.get("sample_id")
+    if not isinstance(sample_id, str):
+        return False
+
+    destination = images_dir / f"{sample_id}.png"
+    if destination.exists():
+        return False
+
+    candidates: list[Path] = []
+    image = record.get("image")
+    if isinstance(image, str):
+        candidates.append(dataset_root / Path(image))
+    candidates.append(dataset_root / "images" / f"{sample_id}.png")
+
+    source = next((path for path in candidates if path.exists()), None)
+    if source is None:
+        raise FileNotFoundError(
+            f"Could not locate crop image for sample {sample_id}: {candidates}"
+        )
+
+    shutil.copy2(source, destination)
+    return True
+
+
 def export_label_studio_storage(
     dataset_root: Path,
     output_dir: Path | None = None,
 ) -> LabelStudioExportSummary:
-    """Create immutable per-sample source tasks plus an empty target directory.
+    """Create a new immutable task batch containing only unseen samples."""
+    dataset_root = dataset_root.resolve()
+    input_dir = (output_dir or dataset_root / "input").resolve()
+    images_dir = input_dir / "images"
+    target_dir = dataset_root / "output" / "annotations"
 
-    One JSON file per sample works naturally with Label Studio Local Files
-    source storage: newly collected crops produce newly named task files, so
-    subsequent storage syncs can discover them without rewriting old batches.
-    Existing task files are deliberately left untouched.
-    """
-    output_dir = output_dir or dataset_root / "label_studio"
-    source_tasks_dir = output_dir / "source" / "tasks"
-    target_dir = output_dir / "target" / "annotations"
-    source_tasks_dir.mkdir(parents=True, exist_ok=True)
+    input_dir.mkdir(parents=True, exist_ok=True)
+    images_dir.mkdir(parents=True, exist_ok=True)
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    config_path = output_dir / "config.xml"
+    config_path = dataset_root / "label-studio-config.xml"
     config_path.write_text(LABEL_CONFIG, encoding="utf-8")
 
+    exported_ids = _existing_exported_ids(input_dir)
     records_dir = dataset_root / "records"
-    created = 0
-    existing = 0
-    total = 0
+    new_tasks: list[dict[str, Any]] = []
+    copied_images = 0
+    total_samples = 0
 
     for record_path in sorted(records_dir.glob("*.json")):
         record = json.loads(record_path.read_text(encoding="utf-8"))
@@ -157,27 +221,32 @@ def export_label_studio_storage(
         if task is None:
             continue
 
+        total_samples += 1
+        if _copy_input_image(dataset_root, images_dir, record):
+            copied_images += 1
+
         sample_id = task["data"]["sample_id"]
-        task_path = source_tasks_dir / f"{sample_id}.json"
-        total += 1
+        if sample_id not in exported_ids:
+            new_tasks.append(task)
 
-        if task_path.exists():
-            existing += 1
-            continue
-
-        task_path.write_text(
-            json.dumps(task, indent=2, ensure_ascii=False) + "\n",
+    batch_path: Path | None = None
+    if new_tasks:
+        batch_path = _next_batch_path(input_dir)
+        batch_path.write_text(
+            json.dumps(new_tasks, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
-        created += 1
 
     return LabelStudioExportSummary(
         config_path=config_path,
-        source_tasks_dir=source_tasks_dir,
-        target_dir=target_dir,
-        created=created,
-        existing=existing,
-        total=total,
+        input_dir=input_dir,
+        images_dir=images_dir,
+        output_dir=target_dir,
+        batch_path=batch_path,
+        new_samples=len(new_tasks),
+        existing_samples=total_samples - len(new_tasks),
+        total_samples=total_samples,
+        copied_images=copied_images,
     )
 
 
@@ -185,10 +254,6 @@ def export_label_studio(
     dataset_root: Path,
     output_dir: Path | None = None,
 ) -> tuple[Path, Path, int]:
-    """Backward-compatible wrapper for callers of the original exporter.
-
-    The second path now points to the source task directory rather than one
-    monolithic tasks.json file.
-    """
+    """Backward-compatible wrapper around the storage exporter."""
     summary = export_label_studio_storage(dataset_root, output_dir)
-    return summary.config_path, summary.source_tasks_dir, summary.total
+    return summary.config_path, summary.input_dir, summary.total_samples
