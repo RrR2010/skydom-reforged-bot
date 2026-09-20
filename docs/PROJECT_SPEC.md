@@ -54,7 +54,7 @@ The geometry pipeline is classical CV and is expected to remain classical unless
 TileColor: red, orange, yellow, green, blue, purple, unknown
 TileKind: normal, carrot, unknown
 TileBlocker: none, chain, unknown
-TilePowerup: none, unknown
+TilePowerup: none, flyer, row, column, bomb, color-remover, unknown
 ```
 
 The taxonomy is intentionally compositional so new power-ups or modifiers can be added without multiplying combined classes.
@@ -128,7 +128,9 @@ Importer:
 skydom-import-label-studio
 ```
 
-It reads Label Studio Target Storage JSON, extracts the latest complete human annotation, and writes it into the matching `dataset/records/<sample_id>.json -> labels` without modifying `suggested`.
+It reads Label Studio Target Storage output, including the observed extensionless Local Files format, extracts the latest complete human annotation, and writes it into the matching `dataset/records/<sample_id>.json -> labels` without modifying `suggested`.
+
+The end-to-end annotation loop has been validated on real data: Label Studio Target Storage -> importer -> canonical record labels.
 
 ## Learned recognizer direction
 
