@@ -88,7 +88,7 @@ def test_report_separates_powerup_quantity_from_color_coverage() -> None:
 
     assert "| MEDIUM | flyer | 5 | 10 | 5/5 | — |" in report
     assert "| MEDIUM | bomb | 3 | 10 | 2/5 | green, purple, yellow |" in report
-    assert "| MEDIUM | column | 1 | 10 | 1/5 | blue, green, orange, yellow |" in report
+    assert "| HIGH | column | 1 | 10 | 1/5 | blue, green, orange, yellow |" in report
 
 
 def test_report_does_not_force_color_coverage_for_color_remover() -> None:
