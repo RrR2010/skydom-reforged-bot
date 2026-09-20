@@ -295,14 +295,15 @@ This view is intended for comparing visually equivalent pieces, normal vs blocke
 
 The perception stack now adds a conservative semantic layer on top of color, shape, and overlay extraction.
 
-Current semantic outputs are:
+Current semantic taxonomy includes:
 
-- `TileKind.NORMAL`
-- `TileKind.CARROT`
-- `TileKind.UNKNOWN`
-- `TileBlocker.NONE`
-- `TileBlocker.CHAIN`
-- `TileBlocker.UNKNOWN`
+- `TileColor.NONE` for cells with no matchable base color;
+- normal color families plus `TileColor.UNKNOWN`;
+- `TileKind.NONE`, `NORMAL`, `CARROT`, and `UNKNOWN`;
+- `TileBlocker.NONE`, `CHAIN`, `ADJACENT_CLEAR`, and `UNKNOWN`;
+- the observed power-up taxonomy plus `NONE` and `UNKNOWN`.
+
+`NONE` means a dimension is known not to apply. `UNKNOWN` is reserved for genuine recognition uncertainty. A whole-cell obstacle cleared by an adjacent match is labeled `color=none`, `kind=none`, `blocker=adjacent-clear`, `powerup=none`.
 
 The semantic classifier intentionally uses several signals rather than one hard shape threshold:
 
@@ -364,6 +365,7 @@ For example:
 BLUE + CARROT + NONE + NONE
 ORANGE + NORMAL + NONE + UNKNOWN_POWERUP
 PURPLE + NORMAL + CHAIN + NONE
+NONE + NONE + ADJACENT_CLEAR + NONE
 ```
 
 The exact power-up taxonomy remains open for future additions as new game pieces are observed.
