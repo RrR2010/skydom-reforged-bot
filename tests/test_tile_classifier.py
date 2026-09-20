@@ -149,3 +149,34 @@ def test_blocker_crossing_center_keeps_large_base_components() -> None:
     # one ~878 px half split by the synthetic blocker.
     assert np.count_nonzero(diagnostics.shape_foreground_mask) > 1800
     assert np.count_nonzero(diagnostics.overlay_foreground_mask) > 200
+
+
+def test_blue_shape_mask_does_not_absorb_blue_board_background() -> None:
+    image = np.zeros((80, 80, 3), dtype=np.uint8)
+    image[:] = (35, 42, 108)  # dark blue board background
+    cell = Cell(0, 0, Point(40, 40), Rect(0, 0, 80, 80), 1.0)
+
+    blue = _rgb_from_hsv(105, s=230, v=245)
+    cv2.ellipse(image, (40, 42), (15, 27), 0, 0, 360, blue, -1)
+
+    observation, diagnostics = TileClassifier().classify_cell(image, cell)
+
+    assert observation.color is TileColor.BLUE
+    shape_fraction = np.count_nonzero(diagnostics.shape_foreground_mask) / diagnostics.shape_foreground_mask.size
+    assert 0.10 < shape_fraction < 0.45
+    assert np.count_nonzero(diagnostics.background_distance_mask) < diagnostics.background_distance_mask.size * 0.60
+
+
+def test_large_white_decoration_is_exposed_as_neutral_overlay() -> None:
+    image = np.zeros((80, 80, 3), dtype=np.uint8)
+    image[:] = (35, 42, 108)
+    cell = Cell(0, 0, Point(40, 40), Rect(0, 0, 80, 80), 1.0)
+
+    orange = _rgb_from_hsv(16)
+    cv2.rectangle(image, (15, 15), (65, 65), orange, -1)
+    cv2.circle(image, (40, 34), 10, (250, 250, 250), -1)
+
+    _, diagnostics = TileClassifier().classify_cell(image, cell)
+
+    neutral_fraction = np.count_nonzero(diagnostics.neutral_overlay_mask) / diagnostics.neutral_overlay_mask.size
+    assert neutral_fraction > 0.04
