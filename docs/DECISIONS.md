@@ -65,3 +65,10 @@
 **Decision:** the current power-up taxonomy is `none`, `flyer`, `row`, `column`, `bomb`, `color-remover`, and `unknown`.
 
 **Reason:** these categories have now been observed and annotated in real gameplay. The learned recognizer should predict these as one semantic head rather than creating combined tile classes.
+
+
+## ADR-012 — Preserve board-capture provenance for dataset splitting
+
+**Decision:** newly collected sample records store one or more `capture_ids`, derived from the detected board crop and logical topology.
+
+**Reason:** random crop-level splitting can leak near-identical visual context from one board capture into both training and validation. Samples may also be de-duplicated across multiple captures, so provenance is accumulated rather than overwritten. Legacy records without capture provenance remain valid training data but are not considered safe held-out validation data unless provenance is recovered.
